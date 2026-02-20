@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Cloudflare Account Settings</title>
+    <style>
+      :root {
+        --bg: #2d2d2d;
+        --bg-input: #3d3d3d;
+        --border: #565656;
+        --text: #d8d8d8;
+        --text-muted: #969696;
+        --accent: #0078d4;
+        --error: #ff6b6b;
+        --success: #4ade80;
+        --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 12px;
+        line-height: 1.4;
+        padding: 12px 0;
+      }
+
+      h2 {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text);
+        padding: 0 16px 8px;
+      }
+
+      .section-note {
+        font-size: 10px;
+        color: #666;
+        padding: 0 16px 8px;
+        font-style: italic;
+      }
+
+      .sdpi-item {
+        display: flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 4px 16px;
+        gap: 8px;
+      }
+
+      .sdpi-item-label {
+        flex: 0 0 80px;
+        text-align: right;
+        color: var(--text-muted);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .sdpi-item-value {
+        flex: 1;
+        min-width: 0;
+      }
+
+      input[type="text"],
+      input[type="password"],
+      select {
+        width: 100%;
+        background: var(--bg-input);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 4px 8px;
+        font-family: var(--font);
+        font-size: 12px;
+        outline: none;
+      }
+
+      input:focus,
+      select:focus {
+        border-color: var(--accent);
+      }
+
+      select {
+        cursor: pointer;
+        appearance: auto;
+      }
+
+      .dropdown-row {
+        display: flex;
+        gap: 4px;
+        align-items: stretch;
+      }
+
+      .dropdown-row select {
+        flex: 1;
+      }
+
+      .load-btn {
+        flex: 0 0 auto;
+        background: var(--bg-input);
+        color: var(--text-muted);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 4px 5px 2px;
+        cursor: pointer;
+        font-size: 12px;
+        font-family: var(--font);
+        white-space: nowrap;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .load-btn:hover {
+        background: #4d4d4d;
+        color: var(--text);
+      }
+
+      .load-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .status-msg {
+        font-size: 10px;
+        color: var(--text-muted);
+        padding: 0 16px 0 96px;
+        min-height: 14px;
+      }
+
+      .separator {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 8px 16px;
+      }
+
+      details {
+        margin: 8px 16px;
+      }
+
+      summary {
+        cursor: pointer;
+        color: var(--text-muted);
+        font-size: 11px;
+      }
+
+      .help-content {
+        color: #808080;
+        font-size: 11px;
+        margin: 4px 0 8px;
+      }
+
+      .help-content ol {
+        padding-left: 16px;
+        margin: 4px 0;
+      }
+
+      .help-content p {
+        margin: 4px 0;
+      }
+
+      .connection-status {
+        font-size: 10px;
+        padding: 4px 16px;
+        color: var(--text-muted);
+      }
+
+      .connection-status.connected {
+        color: var(--success);
+      }
+
+      .connection-status.disconnected {
+        color: var(--error);
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Cloudflare Account Settings</h2>
+    <div class="section-note">These settings are shared across all Cloudflare actions</div>
+
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">API Token</div>
+      <div class="sdpi-item-value">
+        <input
+          type="password"
+          id="apiToken"
+          placeholder="Your Cloudflare API Token"
+        />
+      </div>
+    </div>
+
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Account</div>
+      <div class="sdpi-item-value">
+        <div class="dropdown-row">
+          <select id="accountId">
+            <option value="">-- Select Account --</option>
+          </select>
+          <button type="button" id="loadAccountsBtn" class="load-btn" title="Load accounts from Cloudflare">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.34 13a10 10 0 1 1-2.83-7.83L21.5 8"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="status-msg" id="accountStatus"></div>
+
+    <hr class="separator" />
+
+    <details>
+      <summary>How to create an API Token</summary>
+      <div class="help-content">
+        <ol>
+          <li>Go to <em>Cloudflare Dashboard → Manage Account → Account API Tokens</em></li>
+          <li>Click <em>Create Token</em></li>
+          <li>Use the <em>Read all resources</em> template</li>
+          <li>Save and paste the token above</li>
+          <li>Click the refresh button next to Account to load your accounts</li>
+        </ol>
+      </div>
+    </details>
+
+    <div class="connection-status" id="connStatus">Connecting…</div>
+
+    <script>
+      /* ───────── Communication with parent PI ───────── */
+
+      const CF_API = "https://api.cloudflare.com/client/v4";
+      let globalSettings = {};
+
+      function getWebSocket() {
+        return window.opener && window.opener.websocket;
+      }
+
+      function getPiUUID() {
+        return window.opener && window.opener.piUUID;
+      }
+
+      function init() {
+        const ws = getWebSocket();
+        const connEl = document.getElementById("connStatus");
+
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          connEl.textContent = "Not connected — open this from an action's settings";
+          connEl.className = "connection-status disconnected";
+          return;
+        }
+
+        connEl.textContent = "Connected";
+        connEl.className = "connection-status connected";
+
+        // Listen for global settings from parent's WebSocket
+        ws.addEventListener("message", function (evt) {
+          try {
+            const data = JSON.parse(evt.data);
+            if (data.event === "didReceiveGlobalSettings") {
+              globalSettings = data?.payload?.settings || {};
+              populateFields();
+              // Auto-load accounts to resolve names when token is available
+              if (globalSettings.apiToken) {
+                loadAccounts();
+              }
+            }
+          } catch {
+            // ignore
+          }
+        });
+
+        // Request current global settings
+        ws.send(
+          JSON.stringify({
+            event: "getGlobalSettings",
+            context: getPiUUID(),
+          })
+        );
+      }
+
+      /* ───────── Settings ↔ Form ───────── */
+
+      function populateFields() {
+        document.getElementById("apiToken").value = globalSettings.apiToken || "";
+        var accountId = globalSettings.accountId || "";
+        ensureOption("accountId", accountId);
+        document.getElementById("accountId").value = accountId;
+      }
+
+      function ensureOption(selectId, value) {
+        if (!value) return;
+        var sel = document.getElementById(selectId);
+        if (!sel.querySelector('option[value="' + CSS.escape(value) + '"]')) {
+          var opt = document.createElement("option");
+          opt.value = value;
+          opt.textContent = value;
+          sel.appendChild(opt);
+          sel.value = value;
+        }
+      }
+
+      function saveGlobalSettings() {
+        globalSettings.apiToken = document.getElementById("apiToken").value;
+        globalSettings.accountId = document.getElementById("accountId").value;
+
+        var ws = getWebSocket();
+        var uuid = getPiUUID();
+
+        if (ws && ws.readyState === WebSocket.OPEN && uuid) {
+          ws.send(
+            JSON.stringify({
+              event: "setGlobalSettings",
+              context: uuid,
+              payload: globalSettings,
+            })
+          );
+        }
+      }
+
+      // Bind events
+      var tokenDebounceTimer = null;
+      document.getElementById("apiToken").addEventListener("input", function () {
+        saveGlobalSettings();
+        // Auto-load accounts after user stops typing
+        clearTimeout(tokenDebounceTimer);
+        var token = this.value.trim();
+        if (token.length > 10) {
+          tokenDebounceTimer = setTimeout(function () {
+            loadAccounts();
+          }, 800);
+        }
+      });
+      document.getElementById("accountId").addEventListener("change", saveGlobalSettings);
+
+      /* ───────── Shared helpers ───────── */
+
+      function cfHeaders(token) {
+        return {
+          Authorization: "Bearer " + token,
+          "Content-Type": "application/json",
+        };
+      }
+
+      function showStatus(el, msg, type) {
+        el.textContent = msg;
+        el.style.color =
+          type === "error"
+            ? "#ff6b6b"
+            : type === "success"
+              ? "#4ade80"
+              : "#969696";
+      }
+
+      function populateSelect(selectEl, items, placeholder, currentValue) {
+        selectEl.innerHTML = "";
+        var ph = document.createElement("option");
+        ph.value = "";
+        ph.textContent = placeholder;
+        selectEl.appendChild(ph);
+
+        items.forEach(function (item) {
+          var opt = document.createElement("option");
+          opt.value = item.value;
+          opt.textContent = item.label;
+          selectEl.appendChild(opt);
+        });
+
+        if (currentValue) {
+          selectEl.value = currentValue;
+        }
+      }
+
+      /* ───────── Account List Fetch ───────── */
+
+      const loadAccountsBtn = document.getElementById("loadAccountsBtn");
+      const accountSelect = document.getElementById("accountId");
+      const accountStatusDiv = document.getElementById("accountStatus");
+
+      loadAccountsBtn.addEventListener("click", function () {
+        loadAccounts();
+      });
+
+      async function loadAccounts() {
+        var apiToken = document.getElementById("apiToken").value.trim();
+
+        if (!apiToken) {
+          showStatus(accountStatusDiv, "Enter API Token first", "error");
+          return;
+        }
+
+        loadAccountsBtn.disabled = true;
+        showStatus(accountStatusDiv, "Loading accounts…", "info");
+
+        try {
+          var resp = await fetch(CF_API + "/accounts", {
+            headers: cfHeaders(apiToken),
+          });
+
+          if (!resp.ok) {
+            var errText = "HTTP " + resp.status;
+            if (resp.status === 401 || resp.status === 403) {
+              errText = "Invalid token or insufficient permissions";
+            }
+            throw new Error(errText);
+          }
+
+          var data = await resp.json();
+
+          if (!data.success || !Array.isArray(data.result)) {
+            var msg =
+              (data.errors && data.errors[0] && data.errors[0].message) ||
+              "Unknown API error";
+            throw new Error(msg);
+          }
+
+          var currentValue = accountSelect.value;
+
+          var accounts = data.result
+            .map(function (a) {
+              return { value: a.id, label: a.name || a.id };
+            })
+            .sort(function (a, b) {
+              return a.label.localeCompare(b.label);
+            });
+
+          populateSelect(
+            accountSelect,
+            accounts,
+            "-- Select Account --",
+            currentValue
+          );
+
+          var count = accounts.length;
+          showStatus(
+            accountStatusDiv,
+            count + " account" + (count !== 1 ? "s" : "") + " found",
+            "success"
+          );
+
+          // Auto-select if only one account
+          if (accounts.length === 1 && !currentValue) {
+            accountSelect.value = accounts[0].value;
+            saveGlobalSettings();
+          }
+        } catch (err) {
+          showStatus(
+            accountStatusDiv,
+            err.message || "Failed to load accounts",
+            "error"
+          );
+        } finally {
+          loadAccountsBtn.disabled = false;
+        }
+      }
+
+      /* ───────── Init on load ───────── */
+      window.addEventListener("DOMContentLoaded", init);
+    </script>
+  </body>
+</html>
