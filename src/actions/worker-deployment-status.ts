@@ -41,10 +41,17 @@ type StatusState = "live" | "gradual" | "recent" | "error";
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.worker-deployment-status" })
 export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSettings> {
   private apiClient: CloudflareWorkersApi | null = null;
-  private refreshInterval: ReturnType<typeof setInterval> | null = null;
+  private refreshTimeout: ReturnType<typeof setTimeout> | null = null;
+  private lastState: StatusState | null = null;
 
   /** Ten minutes in milliseconds — threshold for "recent" highlight */
   private static readonly RECENT_THRESHOLD_MS = 10 * 60 * 1000;
+
+  /** Fast polling interval for active states (recent / gradual) */
+  private static readonly FAST_POLL_MS = 10 * 1000;
+
+  /** Back-off interval after an error */
+  private static readonly ERROR_BACKOFF_MS = 30 * 1000;
 
   /**
    * Called when the action appears on the Stream Deck.
@@ -59,15 +66,10 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     }
 
     this.apiClient = new CloudflareWorkersApi(settings.apiToken!, settings.accountId!);
-    const refreshMs = (settings.refreshIntervalSeconds ?? 60) * 1000;
 
-    // Fetch immediately
+    // Fetch immediately, then schedule adaptive polling
     await this.updateStatus(ev);
-
-    // Start periodic refresh
-    this.refreshInterval = setInterval(async () => {
-      await this.updateStatus(ev);
-    }, refreshMs);
+    this.scheduleRefresh(ev);
   }
 
   /**
@@ -76,8 +78,9 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    */
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<WorkerDeploymentSettings>): Promise<void> {
     // Tear down existing refresh cycle
-    this.clearRefreshInterval();
+    this.clearRefreshTimeout();
     this.apiClient = null;
+    this.lastState = null;
 
     const settings = ev.payload.settings;
 
@@ -87,15 +90,10 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     }
 
     this.apiClient = new CloudflareWorkersApi(settings.apiToken!, settings.accountId!);
-    const refreshMs = (settings.refreshIntervalSeconds ?? 60) * 1000;
 
-    // Fetch immediately with new settings
+    // Fetch immediately with new settings, then schedule adaptive polling
     await this.updateStatus(ev);
-
-    // Start periodic refresh
-    this.refreshInterval = setInterval(async () => {
-      await this.updateStatus(ev);
-    }, refreshMs);
+    this.scheduleRefresh(ev);
   }
 
   /**
@@ -103,8 +101,9 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    * Cleans up the refresh interval and API client.
    */
   override onWillDisappear(_ev: WillDisappearEvent<WorkerDeploymentSettings>): void {
-    this.clearRefreshInterval();
+    this.clearRefreshTimeout();
     this.apiClient = null;
+    this.lastState = null;
   }
 
   /**
@@ -145,9 +144,11 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       }
 
       const state = this.resolveState(status);
+      this.lastState = state;
       const title = this.formatTitle(state, settings.workerName, undefined, status);
       await ev.action.setTitle(title);
     } catch (error) {
+      this.lastState = "error";
       streamDeck.logger.error(`Failed to fetch deployment status for "${settings.workerName}":`, error);
       await ev.action.setTitle(this.formatTitle("error", settings.workerName));
     }
@@ -222,12 +223,49 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   }
 
   /**
-   * Clears the periodic refresh interval.
+   * Returns the appropriate polling interval in ms based on the current state.
+   *
+   * - "recent" / "gradual" → fast poll (10 s) for responsive feedback
+   * - "error"              → back-off (30 s) to avoid hammering a failing API
+   * - "live" / default     → user-configured interval (default 60 s)
    */
-  private clearRefreshInterval(): void {
-    if (this.refreshInterval) {
-      clearInterval(this.refreshInterval);
-      this.refreshInterval = null;
+  public getPollingInterval(state: StatusState | null, baseIntervalSeconds: number): number {
+    switch (state) {
+      case "recent":
+      case "gradual":
+        return WorkerDeploymentStatus.FAST_POLL_MS;
+      case "error":
+        return WorkerDeploymentStatus.ERROR_BACKOFF_MS;
+      default:
+        return baseIntervalSeconds * 1000;
+    }
+  }
+
+  /**
+   * Schedules the next poll using setTimeout. The delay is chosen adaptively
+   * based on the last resolved state.
+   */
+  private scheduleRefresh(
+    ev: WillAppearEvent<WorkerDeploymentSettings> | DidReceiveSettingsEvent<WorkerDeploymentSettings>
+  ): void {
+    this.clearRefreshTimeout();
+
+    const baseSeconds = ev.payload.settings.refreshIntervalSeconds ?? 60;
+    const delayMs = this.getPollingInterval(this.lastState, baseSeconds);
+
+    this.refreshTimeout = setTimeout(async () => {
+      await this.updateStatus(ev);
+      this.scheduleRefresh(ev);
+    }, delayMs);
+  }
+
+  /**
+   * Clears the pending refresh timeout.
+   */
+  private clearRefreshTimeout(): void {
+    if (this.refreshTimeout) {
+      clearTimeout(this.refreshTimeout);
+      this.refreshTimeout = null;
     }
   }
 }

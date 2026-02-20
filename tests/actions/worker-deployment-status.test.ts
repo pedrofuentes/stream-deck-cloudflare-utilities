@@ -505,4 +505,221 @@ describe("WorkerDeploymentStatus", () => {
       expect(titleArg).toContain("🔴");
     });
   });
+
+  // ── getPollingInterval ───────────────────────────────────────────────────
+
+  describe("getPollingInterval", () => {
+    it('should return 10 000 ms for "recent" state', () => {
+      expect(action.getPollingInterval("recent", 60)).toBe(10_000);
+    });
+
+    it('should return 10 000 ms for "gradual" state', () => {
+      expect(action.getPollingInterval("gradual", 60)).toBe(10_000);
+    });
+
+    it('should return 30 000 ms for "error" state', () => {
+      expect(action.getPollingInterval("error", 60)).toBe(30_000);
+    });
+
+    it('should return base interval for "live" state', () => {
+      expect(action.getPollingInterval("live", 60)).toBe(60_000);
+    });
+
+    it("should return base interval for null state", () => {
+      expect(action.getPollingInterval(null, 120)).toBe(120_000);
+    });
+
+    it("should ignore base interval for active states", () => {
+      // Even with a very long base interval, active states use fast poll
+      expect(action.getPollingInterval("recent", 3600)).toBe(10_000);
+      expect(action.getPollingInterval("gradual", 3600)).toBe(10_000);
+    });
+
+    it("should ignore base interval for error state", () => {
+      expect(action.getPollingInterval("error", 10)).toBe(30_000);
+    });
+  });
+
+  // ── Adaptive Polling Behavior ────────────────────────────────────────────
+
+  describe("adaptive polling", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    });
+
+    it("should schedule fast poll after detecting recent deployment", async () => {
+      vi.useFakeTimers();
+
+      const recentDate = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: recentDate,
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      const ev = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+        refreshIntervalSeconds: 120,
+      });
+
+      await action.onWillAppear(ev);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
+
+      // Advance by 10s (fast poll interval) — should trigger another fetch
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(2);
+
+      // Should NOT have fetched again at 20s if we haven't advanced that far
+      // (just verifying the timer resolves at the correct interval)
+
+      vi.useRealTimers();
+    });
+
+    it("should schedule normal poll after detecting live deployment", async () => {
+      vi.useFakeTimers();
+
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: "2020-01-01T00:00:00Z",
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      const ev = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+        refreshIntervalSeconds: 120,
+      });
+
+      await action.onWillAppear(ev);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
+
+      // After 10s — should NOT have polled yet (normal interval is 120s)
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
+
+      // After 120s total — should poll
+      await vi.advanceTimersByTimeAsync(110_000);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(2);
+
+      vi.useRealTimers();
+    });
+
+    it("should back off after an error", async () => {
+      vi.useFakeTimers();
+
+      mockGetDeploymentStatus = vi.fn().mockRejectedValue(new Error("fail"));
+
+      const ev = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+        refreshIntervalSeconds: 60,
+      });
+
+      await action.onWillAppear(ev);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
+
+      // After 10s — should NOT have retried (error backoff is 30s)
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
+
+      // After 30s total — should retry
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(2);
+
+      vi.useRealTimers();
+    });
+
+    it("should transition from fast poll to normal poll when deploy ages out", async () => {
+      vi.useFakeTimers();
+
+      // Start with a recent deployment (9 min ago so it ages out after ~1 min)
+      const nineMinAgo = new Date(Date.now() - 9 * 60 * 1000).toISOString();
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: nineMinAgo,
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      const ev = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+        refreshIntervalSeconds: 300,
+      });
+
+      await action.onWillAppear(ev);
+      // First call: state is "recent" → fast poll
+      const firstTitle = ev.action.setTitle.mock.calls[0][0] as string;
+      expect(firstTitle).toContain("🔵");
+
+      // After 10s the deploy is 9m10s old → still recent, fast poll
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(2);
+
+      // After several more fast polls, the deploy ages past 10 min
+      // 6 more × 10s = 60s more → deploy is now 10m+ old → "live"
+      for (let i = 0; i < 6; i++) {
+        await vi.advanceTimersByTimeAsync(10_000);
+      }
+      // At this point deploy is ~9m + 70s = 10m10s → live state
+      // The next poll should now be scheduled at 300s, not 10s
+      const callCount = mockGetDeploymentStatus.mock.calls.length;
+
+      // Advance 10s — should NOT poll (we're now on normal schedule)
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(callCount);
+
+      // Advance remaining to hit 300s — should poll
+      await vi.advanceTimersByTimeAsync(290_000);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(callCount + 1);
+
+      vi.useRealTimers();
+    });
+
+    it("should stop polling after onWillDisappear", async () => {
+      vi.useFakeTimers();
+
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: "2020-01-01T00:00:00Z",
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      const ev = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+        refreshIntervalSeconds: 60,
+      });
+
+      await action.onWillAppear(ev);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
+
+      // Disappear — should cancel the timeout
+      action.onWillDisappear(ev);
+
+      // Advance past the poll interval — should NOT trigger
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
+
+      vi.useRealTimers();
+    });
+  });
 });
