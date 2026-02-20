@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>AI Gateway Metric</title>
+    <style>
+      :root {
+        --bg: #2d2d2d;
+        --bg-input: #3d3d3d;
+        --border: #565656;
+        --text: #d8d8d8;
+        --text-muted: #969696;
+        --accent: #0078d4;
+        --error: #ff6b6b;
+        --success: #4ade80;
+        --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 12px;
+        line-height: 1.4;
+        padding: 0;
+        min-height: 100vh;
+      }
+
+      .sdpi-item {
+        display: flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 4px 16px;
+        gap: 8px;
+      }
+
+      .sdpi-item-label {
+        flex: 0 0 80px;
+        text-align: right;
+        color: var(--text-muted);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .sdpi-item-value {
+        flex: 1;
+        min-width: 0;
+      }
+
+      input[type="number"],
+      select {
+        width: 100%;
+        background: var(--bg-input);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 4px 8px;
+        font-family: var(--font);
+        font-size: 12px;
+        outline: none;
+      }
+
+      input:focus,
+      select:focus {
+        border-color: var(--accent);
+      }
+
+      select {
+        cursor: pointer;
+        appearance: auto;
+      }
+
+      .dropdown-row {
+        display: flex;
+        gap: 4px;
+        align-items: stretch;
+      }
+
+      .dropdown-row select {
+        flex: 1;
+      }
+
+      .load-btn {
+        flex: 0 0 auto;
+        background: var(--bg-input);
+        color: var(--text-muted);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 4px 5px 2px;
+        cursor: pointer;
+        font-size: 12px;
+        font-family: var(--font);
+        white-space: nowrap;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .load-btn:hover {
+        background: #4d4d4d;
+        color: var(--text);
+      }
+
+      .load-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .status-msg {
+        font-size: 10px;
+        color: var(--text-muted);
+        padding: 0 16px 0 96px;
+        min-height: 14px;
+      }
+
+      .separator {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 8px 16px;
+      }
+
+      .section-heading {
+        font-size: 11px;
+        font-weight: 600;
+        color: #969696;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 4px 16px 2px;
+        margin-top: 4px;
+      }
+
+      .settings-btn {
+        display: block;
+        width: calc(100% - 32px);
+        margin: 8px 16px;
+        background: var(--bg-input);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 6px 12px;
+        cursor: pointer;
+        font-family: var(--font);
+        font-size: 12px;
+        text-align: center;
+      }
+
+      .settings-btn:hover {
+        background: #4d4d4d;
+        border-color: var(--accent);
+      }
+
+      .account-info {
+        font-size: 10px;
+        color: var(--text-muted);
+        padding: 0 16px 4px;
+        font-style: italic;
+      }
+
+      .account-info.configured {
+        color: var(--success);
+      }
+
+      .account-info.not-configured {
+        color: var(--error);
+      }
+    </style>
+  </head>
+  <body>
+    <button type="button" id="openSetupBtn" class="settings-btn">
+      ⚙️ Cloudflare Account Settings
+    </button>
+    <div class="account-info" id="accountInfo">Checking account settings…</div>
+
+    <hr class="separator" />
+    <div class="section-heading">Gateway Settings</div>
+
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Gateway</div>
+      <div class="sdpi-item-value">
+        <div class="dropdown-row">
+          <select id="gatewayId">
+            <option value="">-- Select Gateway --</option>
+          </select>
+          <button type="button" id="loadGatewaysBtn" class="load-btn" title="Load gateways from Cloudflare">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.34 13a10 10 0 1 1-2.83-7.83L21.5 8"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="status-msg" id="gatewayStatus"></div>
+
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Metric</div>
+      <div class="sdpi-item-value">
+        <select id="metric">
+          <option value="requests">Requests</option>
+          <option value="tokens">Tokens</option>
+          <option value="cost">Cost</option>
+          <option value="errors">Errors</option>
+          <option value="logs_stored">Logs Stored</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Time Range</div>
+      <div class="sdpi-item-value">
+        <select id="timeRange">
+          <option value="24h">Last 24 hours</option>
+          <option value="7d">Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Refresh (s)</div>
+      <div class="sdpi-item-value">
+        <input
+          type="number"
+          id="refreshIntervalSeconds"
+          placeholder="60"
+          min="10"
+          max="3600"
+        />
+      </div>
+    </div>
+
+    <hr class="separator" />
+
+    <details>
+      <summary>Tips</summary>
+      <div class="help-content" style="color: #808080; font-size: 11px; margin: 4px 0 8px;">
+        <p>Press the key to cycle through metrics: Requests → Tokens → Cost → Errors → Logs</p>
+      </div>
+    </details>
+
+    <script>
+      /* ───────── Stream Deck WebSocket ───────── */
+      let websocket = null;
+      let piUUID = "";
+      let globalSettings = {};
+      let actionSettings = {};
+
+      const CF_API = "https://api.cloudflare.com/client/v4";
+
+      function connectElgatoStreamDeckSocket(
+        port,
+        uuid,
+        registerEvent,
+        info,
+        actionInfo
+      ) {
+        piUUID = uuid;
+
+        // Expose for setup popup
+        window.piUUID = uuid;
+
+        try {
+          const action = JSON.parse(actionInfo);
+          actionSettings = action?.payload?.settings || {};
+        } catch {
+          actionSettings = {};
+        }
+
+        websocket = new WebSocket("ws://127.0.0.1:" + port);
+
+        // Expose for setup popup
+        window.websocket = websocket;
+
+        websocket.onopen = function () {
+          websocket.send(
+            JSON.stringify({ event: registerEvent, uuid: uuid })
+          );
+          // Request global settings
+          websocket.send(
+            JSON.stringify({ event: "getGlobalSettings", context: uuid })
+          );
+          populateActionFields();
+        };
+
+        websocket.onmessage = function (evt) {
+          try {
+            const data = JSON.parse(evt.data);
+            if (data.event === "didReceiveGlobalSettings") {
+              globalSettings = data?.payload?.settings || {};
+              updateAccountInfo();
+              // Auto-load gateways if credentials are set
+              if (globalSettings.apiToken && globalSettings.accountId && !gatewaySelect.value) {
+                loadGateways();
+              }
+            }
+            if (data.event === "didReceiveSettings") {
+              actionSettings = data?.payload?.settings || {};
+              populateActionFields();
+            }
+          } catch {
+            // ignore
+          }
+        };
+      }
+
+      /* ───────── Setup Popup ───────── */
+
+      var setupPopup = null;
+
+      document.getElementById("openSetupBtn").addEventListener("click", function () {
+        if (setupPopup && !setupPopup.closed) {
+          setupPopup.focus();
+          return;
+        }
+        setupPopup = window.open(
+          "setup.html",
+          "Cloudflare Account Settings",
+          "width=500,height=350"
+        );
+      });
+
+      /* ───────── Account Info Display ───────── */
+
+      function updateAccountInfo() {
+        var el = document.getElementById("accountInfo");
+        if (globalSettings.apiToken && globalSettings.accountId) {
+          el.textContent = "✓ Account configured";
+          el.className = "account-info configured";
+        } else if (globalSettings.apiToken) {
+          el.textContent = "Token set — select an account in Settings";
+          el.className = "account-info not-configured";
+        } else {
+          el.textContent = "Not configured — click Settings above";
+          el.className = "account-info not-configured";
+        }
+      }
+
+      /* ───────── Settings ↔ Form ───────── */
+
+      const ACTION_FIELDS = [
+        "gatewayId",
+        "metric",
+        "timeRange",
+        "refreshIntervalSeconds",
+      ];
+
+      function populateActionFields() {
+        ACTION_FIELDS.forEach(function (key) {
+          var el = document.getElementById(key);
+          if (el) el.value = actionSettings[key] || "";
+        });
+        ensureOption("gatewayId", actionSettings.gatewayId);
+        // Default selections
+        if (!actionSettings.metric) {
+          document.getElementById("metric").value = "requests";
+        }
+        if (!actionSettings.timeRange) {
+          document.getElementById("timeRange").value = "24h";
+        }
+      }
+
+      function ensureOption(selectId, value) {
+        if (!value) return;
+        var sel = document.getElementById(selectId);
+        if (!sel.querySelector('option[value="' + CSS.escape(value) + '"]')) {
+          var opt = document.createElement("option");
+          opt.value = value;
+          opt.textContent = value;
+          sel.appendChild(opt);
+          sel.value = value;
+        }
+      }
+
+      function saveActionSettings() {
+        ACTION_FIELDS.forEach(function (key) {
+          var el = document.getElementById(key);
+          if (el) actionSettings[key] = el.value;
+        });
+
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+          websocket.send(
+            JSON.stringify({
+              event: "setSettings",
+              context: piUUID,
+              payload: actionSettings,
+            })
+          );
+        }
+      }
+
+      // Bind change/input events — action fields
+      ACTION_FIELDS.forEach(function (key) {
+        var el = document.getElementById(key);
+        if (el) {
+          el.addEventListener("input", saveActionSettings);
+          el.addEventListener("change", saveActionSettings);
+        }
+      });
+
+      /* ───────── Shared helpers ───────── */
+
+      function cfHeaders(token) {
+        return {
+          Authorization: "Bearer " + token,
+          "Content-Type": "application/json",
+        };
+      }
+
+      function showStatus(el, msg, type) {
+        el.textContent = msg;
+        el.style.color =
+          type === "error"
+            ? "#ff6b6b"
+            : type === "success"
+              ? "#4ade80"
+              : "#969696";
+      }
+
+      function populateSelect(selectEl, items, placeholder, currentValue) {
+        selectEl.innerHTML = "";
+        var ph = document.createElement("option");
+        ph.value = "";
+        ph.textContent = placeholder;
+        selectEl.appendChild(ph);
+
+        items.forEach(function (item) {
+          var opt = document.createElement("option");
+          opt.value = item.value;
+          opt.textContent = item.label;
+          selectEl.appendChild(opt);
+        });
+
+        if (currentValue) {
+          selectEl.value = currentValue;
+        }
+      }
+
+      /* ───────── Gateway List Fetch ───────── */
+
+      const loadGatewaysBtn = document.getElementById("loadGatewaysBtn");
+      const gatewaySelect = document.getElementById("gatewayId");
+      const gatewayStatusDiv = document.getElementById("gatewayStatus");
+
+      loadGatewaysBtn.addEventListener("click", function () {
+        loadGateways();
+      });
+
+      async function loadGateways() {
+        var apiToken = globalSettings.apiToken;
+        var accountId = globalSettings.accountId;
+
+        if (!apiToken || !accountId) {
+          showStatus(gatewayStatusDiv, "Configure account in Settings first", "error");
+          return;
+        }
+
+        loadGatewaysBtn.disabled = true;
+        showStatus(gatewayStatusDiv, "Loading gateways…", "info");
+
+        try {
+          var resp = await fetch(
+            CF_API +
+              "/accounts/" +
+              encodeURIComponent(accountId) +
+              "/ai-gateway/gateways",
+            { headers: cfHeaders(apiToken) }
+          );
+
+          if (!resp.ok) {
+            var errText = "HTTP " + resp.status;
+            if (resp.status === 401 || resp.status === 403) {
+              errText = "Invalid token or insufficient permissions";
+            } else if (resp.status === 404) {
+              errText = "Account not found or AI Gateway not enabled";
+            }
+            throw new Error(errText);
+          }
+
+          var data = await resp.json();
+
+          if (!data.success || !Array.isArray(data.result)) {
+            var msg =
+              (data.errors && data.errors[0] && data.errors[0].message) ||
+              "Unknown API error";
+            throw new Error(msg);
+          }
+
+          var currentValue = gatewaySelect.value;
+
+          var gateways = data.result
+            .map(function (g) {
+              return { value: g.id, label: g.name || g.id };
+            })
+            .sort(function (a, b) {
+              return a.label.localeCompare(b.label);
+            });
+
+          populateSelect(
+            gatewaySelect,
+            gateways,
+            "-- Select Gateway --",
+            currentValue
+          );
+
+          var count = gateways.length;
+          showStatus(
+            gatewayStatusDiv,
+            count + " gateway" + (count !== 1 ? "s" : "") + " found",
+            "success"
+          );
+
+          // Auto-select if only one gateway
+          if (gateways.length === 1 && !currentValue) {
+            gatewaySelect.value = gateways[0].value;
+            saveActionSettings();
+          }
+        } catch (err) {
+          showStatus(
+            gatewayStatusDiv,
+            err.message || "Failed to load gateways",
+            "error"
+          );
+        } finally {
+          loadGatewaysBtn.disabled = false;
+        }
+      }
+    </script>
+  </body>
+</html>
