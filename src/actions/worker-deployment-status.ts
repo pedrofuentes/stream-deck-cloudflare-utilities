@@ -22,7 +22,7 @@ export type WorkerDeploymentSettings = CloudflareAuthSettings & {
 /**
  * Visual state identifiers for the Stream Deck key.
  */
-type StatusState = "live" | "gradual" | "recent" | "error" | "unconfigured";
+type StatusState = "live" | "gradual" | "recent" | "error";
 
 /**
  * Worker Deployment Status action — displays the current deployment status
@@ -33,7 +33,9 @@ type StatusState = "live" | "gradual" | "recent" | "error" | "unconfigured";
  * - 🟡 Amber  → gradual rollout (split traffic)
  * - 🔵 Blue   → recently deployed (< 10 min)
  * - 🔴 Red    → error fetching status
- * - ⚫ Gray   → not configured
+ *
+ * When not yet configured, the key shows "..." as a passive placeholder.
+ * All configuration is done through the Property Inspector.
  */
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.worker-deployment-status" })
 export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSettings> {
@@ -51,7 +53,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     const settings = ev.payload.settings;
 
     if (!this.hasRequiredSettings(settings)) {
-      await ev.action.setTitle(this.formatTitle("unconfigured"));
+      await ev.action.setTitle("...");
       return;
     }
 
@@ -83,7 +85,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     const settings = ev.payload.settings;
 
     if (!this.hasRequiredSettings(settings)) {
-      await ev.action.setTitle(this.formatTitle("unconfigured"));
+      // Nothing to do — configuration happens in the Property Inspector
       return;
     }
 
@@ -101,7 +103,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     const settings = ev.payload.settings;
 
     if (!this.apiClient || !settings.workerName) {
-      await ev.action.setTitle(this.formatTitle("unconfigured"));
+      await ev.action.setTitle("...");
       return;
     }
 
@@ -160,9 +162,6 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     const name = workerName ? truncateWorkerName(workerName) : "";
 
     switch (state) {
-      case "unconfigured":
-        return "⚫\nSetup";
-
       case "error":
         return errorMessage ? `${name}\n🔴 ${errorMessage}` : `${name}\n🔴 ERR`;
 

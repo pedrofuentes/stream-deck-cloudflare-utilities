@@ -138,16 +138,6 @@ describe("WorkerDeploymentStatus", () => {
       };
     }
 
-    it('should display "⚫\\nSetup" for unconfigured state', () => {
-      const title = action.formatTitle("unconfigured");
-      expect(title).toBe("⚫\nSetup");
-    });
-
-    it('should display "⚫\\nSetup" for unconfigured state even with a worker name', () => {
-      const title = action.formatTitle("unconfigured", "my-worker");
-      expect(title).toBe("⚫\nSetup");
-    });
-
     it("should display error state with worker name", () => {
       const title = action.formatTitle("error", "my-worker");
       expect(title).toBe("my-worke\n🔴 ERR");
@@ -237,28 +227,28 @@ describe("WorkerDeploymentStatus", () => {
       vi.useRealTimers();
     });
 
-    it("should show unconfigured when apiToken is missing", async () => {
+    it("should show placeholder when apiToken is missing", async () => {
       const ev = makeMockEvent({ accountId: "acc", workerName: "w" });
       await action.onWillAppear(ev);
-      expect(ev.action.setTitle).toHaveBeenCalledWith("⚫\nSetup");
+      expect(ev.action.setTitle).toHaveBeenCalledWith("...");
     });
 
-    it("should show unconfigured when accountId is missing", async () => {
+    it("should show placeholder when accountId is missing", async () => {
       const ev = makeMockEvent({ apiToken: "tok", workerName: "w" });
       await action.onWillAppear(ev);
-      expect(ev.action.setTitle).toHaveBeenCalledWith("⚫\nSetup");
+      expect(ev.action.setTitle).toHaveBeenCalledWith("...");
     });
 
-    it("should show unconfigured when workerName is missing", async () => {
+    it("should show placeholder when workerName is missing", async () => {
       const ev = makeMockEvent({ apiToken: "tok", accountId: "acc" });
       await action.onWillAppear(ev);
-      expect(ev.action.setTitle).toHaveBeenCalledWith("⚫\nSetup");
+      expect(ev.action.setTitle).toHaveBeenCalledWith("...");
     });
 
-    it("should show unconfigured when all settings are empty", async () => {
+    it("should show placeholder when all settings are empty", async () => {
       const ev = makeMockEvent({});
       await action.onWillAppear(ev);
-      expect(ev.action.setTitle).toHaveBeenCalledWith("⚫\nSetup");
+      expect(ev.action.setTitle).toHaveBeenCalledWith("...");
     });
 
     it("should fetch status and update title when settings are complete", async () => {
@@ -341,10 +331,10 @@ describe("WorkerDeploymentStatus", () => {
       vi.restoreAllMocks();
     });
 
-    it("should show unconfigured when settings are incomplete", async () => {
+    it("should do nothing when settings are incomplete", async () => {
       const ev = makeMockEvent({});
       await action.onKeyDown(ev);
-      expect(ev.action.setTitle).toHaveBeenCalledWith("⚫\nSetup");
+      expect(ev.action.setTitle).not.toHaveBeenCalled();
     });
 
     it("should refresh status on key press with valid settings", async () => {
