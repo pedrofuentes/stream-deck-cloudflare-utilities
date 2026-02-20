@@ -1,5 +1,6 @@
 import streamDeck, {
   action,
+  DidReceiveSettingsEvent,
   KeyDownEvent,
   SingletonAction,
   WillAppearEvent,
@@ -70,6 +71,34 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   }
 
   /**
+   * Called when settings are updated via the Property Inspector.
+   * Re-initializes the API client and restarts the refresh cycle.
+   */
+  override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<WorkerDeploymentSettings>): Promise<void> {
+    // Tear down existing refresh cycle
+    this.clearRefreshInterval();
+    this.apiClient = null;
+
+    const settings = ev.payload.settings;
+
+    if (!this.hasRequiredSettings(settings)) {
+      await ev.action.setTitle("...");
+      return;
+    }
+
+    this.apiClient = new CloudflareWorkersApi(settings.apiToken!, settings.accountId!);
+    const refreshMs = (settings.refreshIntervalSeconds ?? 60) * 1000;
+
+    // Fetch immediately with new settings
+    await this.updateStatus(ev);
+
+    // Start periodic refresh
+    this.refreshInterval = setInterval(async () => {
+      await this.updateStatus(ev);
+    }, refreshMs);
+  }
+
+  /**
    * Called when the action disappears from the Stream Deck.
    * Cleans up the refresh interval and API client.
    */
@@ -98,7 +127,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    * Fetches the deployment status and updates the key display.
    */
   private async updateStatus(
-    ev: WillAppearEvent<WorkerDeploymentSettings> | KeyDownEvent<WorkerDeploymentSettings>
+    ev: WillAppearEvent<WorkerDeploymentSettings> | KeyDownEvent<WorkerDeploymentSettings> | DidReceiveSettingsEvent<WorkerDeploymentSettings>
   ): Promise<void> {
     const settings = ev.payload.settings;
 

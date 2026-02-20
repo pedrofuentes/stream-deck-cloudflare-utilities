@@ -326,6 +326,136 @@ describe("WorkerDeploymentStatus", () => {
     });
   });
 
+  describe("onDidReceiveSettings", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    });
+
+    it("should show placeholder when new settings are incomplete", async () => {
+      const ev = makeMockEvent({ apiToken: "tok" });
+      await action.onDidReceiveSettings(ev);
+      expect(ev.action.setTitle).toHaveBeenCalledWith("...");
+    });
+
+    it("should show placeholder when new settings are empty", async () => {
+      const ev = makeMockEvent({});
+      await action.onDidReceiveSettings(ev);
+      expect(ev.action.setTitle).toHaveBeenCalledWith("...");
+    });
+
+    it("should fetch status when settings become complete", async () => {
+      vi.useFakeTimers();
+
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: "2020-01-01T00:00:00Z",
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      const ev = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+        refreshIntervalSeconds: 120,
+      });
+
+      await action.onDidReceiveSettings(ev);
+
+      expect(mockGetDeploymentStatus).toHaveBeenCalledWith("my-api");
+      const titleArg = ev.action.setTitle.mock.calls[0][0] as string;
+      expect(titleArg).toContain("🟢");
+
+      vi.useRealTimers();
+    });
+
+    it("should show error when API call fails after settings update", async () => {
+      vi.useFakeTimers();
+
+      mockGetDeploymentStatus = vi.fn().mockRejectedValue(new Error("bad token"));
+
+      const ev = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+      });
+
+      await action.onDidReceiveSettings(ev);
+
+      const titleArg = ev.action.setTitle.mock.calls[0][0] as string;
+      expect(titleArg).toContain("🔴");
+
+      vi.useRealTimers();
+    });
+
+    it("should restart refresh cycle when settings change", async () => {
+      vi.useFakeTimers();
+
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: "2020-01-01T00:00:00Z",
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      // First appearance with settings
+      const ev1 = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "worker-a",
+        refreshIntervalSeconds: 60,
+      });
+      await action.onWillAppear(ev1);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledWith("worker-a");
+
+      // Settings change via PI — should restart with new worker name
+      const ev2 = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "worker-b",
+        refreshIntervalSeconds: 60,
+      });
+      await action.onDidReceiveSettings(ev2);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledWith("worker-b");
+
+      vi.useRealTimers();
+    });
+
+    it("should handle transition from configured to unconfigured", async () => {
+      vi.useFakeTimers();
+
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: "2020-01-01T00:00:00Z",
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      // First: fully configured
+      const ev1 = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+      });
+      await action.onDidReceiveSettings(ev1);
+      expect(mockGetDeploymentStatus).toHaveBeenCalled();
+
+      // Then: user clears settings
+      const ev2 = makeMockEvent({});
+      await action.onDidReceiveSettings(ev2);
+      expect(ev2.action.setTitle).toHaveBeenCalledWith("...");
+
+      vi.useRealTimers();
+    });
+  });
+
   describe("onKeyDown", () => {
     afterEach(() => {
       vi.restoreAllMocks();
