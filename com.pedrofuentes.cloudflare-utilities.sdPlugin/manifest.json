@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "Actions": [
+    {
+      "Icon": "imgs/actions/cloudflare-status",
+      "Name": "Cloudflare Status",
+      "States": [
+        {
+          "Image": "imgs/actions/cloudflare-status"
+        }
+      ],
+      "Tooltip": "Display Cloudflare system status",
+      "UUID": "com.pedrofuentes.cloudflare-utilities.status"
+    }
+  ],
+  "Author": "Pedro Fuentes",
+  "Category": "Cloudflare Utilities",
+  "CategoryIcon": "imgs/plugin/category-icon",
+  "CodePath": "bin/plugin.js",
+  "Description": "A set of utilities to display information from Cloudflare on your Stream Deck",
+  "Icon": "imgs/plugin/marketplace",
+  "Name": "Cloudflare Utilities",
+  "Nodejs": {
+    "Version": "20",
+    "Debug": "enabled"
+  },
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "13"
+    },
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "SDKVersion": 2,
+  "Software": {
+    "MinimumVersion": "6.9"
+  },
+  "URL": "https://github.com/pedrofuentes/stream-deck-cloudflare-utilities",
+  "UUID": "com.pedrofuentes.cloudflare-utilities",
+  "Version": "1.0.0.0"
+}

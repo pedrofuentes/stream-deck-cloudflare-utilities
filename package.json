@@ -1,0 +1,50 @@
+{
+  "name": "stream-deck-cloudflare-utilities",
+  "version": "1.0.0.0",
+  "description": "Stream Deck plugin providing Cloudflare utilities and monitoring",
+  "main": "src/plugin.ts",
+  "type": "module",
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c -w --watch.onEnd=\"streamdeck restart com.pedrofuentes.cloudflare-utilities\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "tsc --noEmit",
+    "validate": "streamdeck validate com.pedrofuentes.cloudflare-utilities.sdPlugin",
+    "pack": "npm run build && streamdeck pack com.pedrofuentes.cloudflare-utilities.sdPlugin --output dist/",
+    "prepack": "npm run test && npm run lint"
+  },
+  "keywords": [
+    "stream-deck",
+    "elgato",
+    "cloudflare",
+    "plugin",
+    "utilities",
+    "monitoring"
+  ],
+  "author": "Pedro Fuentes",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pedrofuentes/stream-deck-cloudflare-utilities.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pedrofuentes/stream-deck-cloudflare-utilities/issues"
+  },
+  "homepage": "https://github.com/pedrofuentes/stream-deck-cloudflare-utilities#readme",
+  "dependencies": {
+    "@elgato/streamdeck": "^2.0.1"
+  },
+  "devDependencies": {
+    "@elgato/cli": "^1.7.1",
+    "@rollup/plugin-commonjs": "^29.0.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-typescript": "^12.3.0",
+    "@types/node": "^25.3.0",
+    "rollup": "^4.57.1",
+    "tslib": "^2.8.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
