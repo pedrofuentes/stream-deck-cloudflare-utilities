@@ -7,11 +7,11 @@
       "States": [
         {
           "Image": "imgs/actions/cloudflare-status",
-          "ShowTitle": false,
-          "UserTitleEnabled": false
+          "ShowTitle": false
         }
       ],
       "Tooltip": "Display Cloudflare system status",
+      "UserTitleEnabled": false,
       "UUID": "com.pedrofuentes.cloudflare-utilities.status"
     },
     {
@@ -21,12 +21,26 @@
       "States": [
         {
           "Image": "imgs/actions/worker-deployment-status",
-          "ShowTitle": false,
-          "UserTitleEnabled": false
+          "ShowTitle": false
         }
       ],
       "Tooltip": "Display deployment status of a Cloudflare Worker",
+      "UserTitleEnabled": false,
       "UUID": "com.pedrofuentes.cloudflare-utilities.worker-deployment-status"
+    },
+    {
+      "Icon": "imgs/actions/ai-gateway-metric",
+      "Name": "AI Gateway Metric",
+      "PropertyInspectorPath": "ui/ai-gateway-metric.html",
+      "States": [
+        {
+          "Image": "imgs/actions/ai-gateway-metric",
+          "ShowTitle": false
+        }
+      ],
+      "Tooltip": "Display metrics from a Cloudflare AI Gateway",
+      "UserTitleEnabled": false,
+      "UUID": "com.pedrofuentes.cloudflare-utilities.ai-gateway-metric"
     }
   ],
   "Author": "Pedro Fuentes",
