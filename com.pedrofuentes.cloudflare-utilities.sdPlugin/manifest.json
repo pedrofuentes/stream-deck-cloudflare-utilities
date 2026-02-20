@@ -6,7 +6,9 @@
       "Name": "Cloudflare Status",
       "States": [
         {
-          "Image": "imgs/actions/cloudflare-status"
+          "Image": "imgs/actions/cloudflare-status",
+          "ShowTitle": false,
+          "UserTitleEnabled": false
         }
       ],
       "Tooltip": "Display Cloudflare system status",
@@ -18,7 +20,9 @@
       "PropertyInspectorPath": "ui/worker-deployment-status.html",
       "States": [
         {
-          "Image": "imgs/actions/worker-deployment-status"
+          "Image": "imgs/actions/worker-deployment-status",
+          "ShowTitle": false,
+          "UserTitleEnabled": false
         }
       ],
       "Tooltip": "Display deployment status of a Cloudflare Worker",

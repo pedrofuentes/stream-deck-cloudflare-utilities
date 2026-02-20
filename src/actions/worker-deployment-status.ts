@@ -8,6 +8,7 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 
 import { CloudflareWorkersApi, formatTimeAgo, truncateWorkerName } from "../services/cloudflare-workers-api";
+import { renderKeyImage, renderPlaceholderImage, STATUS_COLORS } from "../services/key-image-renderer";
 import type { CloudflareAuthSettings, DeploymentStatus } from "../types/cloudflare-workers";
 
 /**
@@ -61,7 +62,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     const settings = ev.payload.settings;
 
     if (!this.hasRequiredSettings(settings)) {
-      await ev.action.setTitle("...");
+      await ev.action.setImage(renderPlaceholderImage());
       return;
     }
 
@@ -85,7 +86,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     const settings = ev.payload.settings;
 
     if (!this.hasRequiredSettings(settings)) {
-      await ev.action.setTitle("...");
+      await ev.action.setImage(renderPlaceholderImage());
       return;
     }
 
@@ -131,7 +132,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     const settings = ev.payload.settings;
 
     if (!this.apiClient || !settings.workerName) {
-      await ev.action.setTitle("...");
+      await ev.action.setImage(renderPlaceholderImage());
       return;
     }
 
@@ -139,18 +140,17 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       const status = await this.apiClient.getDeploymentStatus(settings.workerName);
 
       if (!status) {
-        await ev.action.setTitle(this.formatTitle("error", settings.workerName, "No deploys"));
+        await ev.action.setImage(this.renderStatus("error", settings.workerName, "No deploys"));
         return;
       }
 
       const state = this.resolveState(status);
       this.lastState = state;
-      const title = this.formatTitle(state, settings.workerName, undefined, status);
-      await ev.action.setTitle(title);
+      await ev.action.setImage(this.renderStatus(state, settings.workerName, undefined, status));
     } catch (error) {
       this.lastState = "error";
       streamDeck.logger.error(`Failed to fetch deployment status for "${settings.workerName}":`, error);
-      await ev.action.setTitle(this.formatTitle("error", settings.workerName));
+      await ev.action.setImage(this.renderStatus("error", settings.workerName));
     }
   }
 
@@ -176,14 +176,14 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   }
 
   /**
-   * Formats the title text to display on the Stream Deck key.
+   * Renders a data URI SVG image for the Stream Deck key.
    *
-   * Layout (3 lines max):
+   * Layout (3 lines):
    *   Line 1: Worker name (truncated)
-   *   Line 2: Status indicator + time ago
-   *   Line 3: Version split (if gradual) or source
+   *   Line 2: Status label (with colored dot)
+   *   Line 3: Time ago + source/split
    */
-  public formatTitle(
+  public renderStatus(
     state: StatusState,
     workerName?: string,
     errorMessage?: string,
@@ -193,25 +193,48 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
 
     switch (state) {
       case "error":
-        return errorMessage ? `${name}\n🔴 ${errorMessage}` : `${name}\n🔴 ERR`;
+        return renderKeyImage({
+          line1: name,
+          line2: errorMessage ?? "ERR",
+          statusColor: STATUS_COLORS.red,
+        });
 
       case "recent": {
         const timeAgo = status ? formatTimeAgo(status.createdOn) : "";
-        return `${name}\n🔵 ${timeAgo}\n${status?.source ?? ""}`;
+        return renderKeyImage({
+          line1: name,
+          line2: timeAgo || "Recent",
+          line3: status?.source ?? "",
+          statusColor: STATUS_COLORS.blue,
+        });
       }
 
       case "gradual": {
         const timeAgo = status ? formatTimeAgo(status.createdOn) : "";
-        return `${name}\n🟡 ${timeAgo}\n${status?.versionSplit ?? ""}`;
+        return renderKeyImage({
+          line1: name,
+          line2: timeAgo || "Gradual",
+          line3: status?.versionSplit ?? "",
+          statusColor: STATUS_COLORS.orange,
+        });
       }
 
       case "live": {
         const timeAgo = status ? formatTimeAgo(status.createdOn) : "";
-        return `${name}\n🟢 ${timeAgo}\n${status?.source ?? ""}`;
+        return renderKeyImage({
+          line1: name,
+          line2: timeAgo || "Live",
+          line3: status?.source ?? "",
+          statusColor: STATUS_COLORS.green,
+        });
       }
 
       default:
-        return `${name}\n? N/A`;
+        return renderKeyImage({
+          line1: name,
+          line2: "N/A",
+          statusColor: STATUS_COLORS.gray,
+        });
     }
   }
 

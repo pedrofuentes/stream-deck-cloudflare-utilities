@@ -6,6 +6,7 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 
 import { CloudflareApiClient } from "../services/cloudflare-api-client";
+import { renderKeyImage, STATUS_COLORS } from "../services/key-image-renderer";
 
 /**
  * Cloudflare Status action - displays the current Cloudflare system status
@@ -64,29 +65,52 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
   ): Promise<void> {
     try {
       const status = await this.apiClient.getSystemStatus();
-      const title = this.formatStatusTitle(status.indicator);
-      await ev.action.setTitle(title);
+      await ev.action.setImage(this.renderStatusImage(status.indicator));
     } catch (error) {
       streamDeck.logger.error("Failed to fetch Cloudflare status:", error);
-      await ev.action.setTitle("ERR");
+      await ev.action.setImage(renderKeyImage({
+        line1: "Cloudflare",
+        line2: "ERR",
+        statusColor: STATUS_COLORS.red,
+      }));
     }
   }
 
   /**
-   * Maps a status indicator to a display-friendly title.
+   * Renders an SVG data URI for the given status indicator.
    */
-  public formatStatusTitle(indicator: string): string {
+  public renderStatusImage(indicator: string): string {
     switch (indicator) {
       case "none":
-        return "✓ OK";
+        return renderKeyImage({
+          line1: "Cloudflare",
+          line2: "OK",
+          statusColor: STATUS_COLORS.green,
+        });
       case "minor":
-        return "⚠ Minor";
+        return renderKeyImage({
+          line1: "Cloudflare",
+          line2: "Minor",
+          statusColor: STATUS_COLORS.amber,
+        });
       case "major":
-        return "✖ Major";
+        return renderKeyImage({
+          line1: "Cloudflare",
+          line2: "Major",
+          statusColor: STATUS_COLORS.red,
+        });
       case "critical":
-        return "🔴 Crit";
+        return renderKeyImage({
+          line1: "Cloudflare",
+          line2: "Critical",
+          statusColor: STATUS_COLORS.red,
+        });
       default:
-        return "? N/A";
+        return renderKeyImage({
+          line1: "Cloudflare",
+          line2: "N/A",
+          statusColor: STATUS_COLORS.gray,
+        });
     }
   }
 }
