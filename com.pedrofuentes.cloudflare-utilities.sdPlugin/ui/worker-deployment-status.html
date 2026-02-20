@@ -81,7 +81,7 @@
       .worker-row {
         display: flex;
         gap: 4px;
-        align-items: center;
+        align-items: stretch;
       }
 
       .worker-row select {
@@ -94,11 +94,15 @@
         color: var(--text-muted);
         border: 1px solid var(--border);
         border-radius: 3px;
-        padding: 4px 8px;
+        padding: 4px 5px 2px;
         cursor: pointer;
         font-size: 12px;
         font-family: var(--font);
         white-space: nowrap;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
 
       .load-btn:hover {
@@ -163,15 +167,19 @@
     </div>
 
     <div class="sdpi-item">
-      <div class="sdpi-item-label">Account ID</div>
+      <div class="sdpi-item-label">Account</div>
       <div class="sdpi-item-value">
-        <input
-          type="text"
-          id="accountId"
-          placeholder="32-character hex Account ID"
-        />
+        <div class="worker-row">
+          <select id="accountId">
+            <option value="">-- Select Account --</option>
+          </select>
+          <button type="button" id="loadAccountsBtn" class="load-btn" title="Load accounts from Cloudflare">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.34 13a10 10 0 1 1-2.83-7.83L21.5 8"/></svg>
+          </button>
+        </div>
       </div>
     </div>
+    <div class="status-msg" id="accountStatus"></div>
 
     <div class="sdpi-item">
       <div class="sdpi-item-label">Worker</div>
@@ -181,7 +189,7 @@
             <option value="">-- Select Worker --</option>
           </select>
           <button type="button" id="loadWorkersBtn" class="load-btn" title="Load workers from Cloudflare">
-            Load
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.34 13a10 10 0 1 1-2.83-7.83L21.5 8"/></svg>
           </button>
         </div>
       </div>
@@ -207,19 +215,12 @@
       <summary>How to create an API Token</summary>
       <div class="help-content">
         <ol>
-          <li>Go to <em>Cloudflare Dashboard → My Profile → API Tokens</em></li>
+          <li>Go to <em>Cloudflare Dashboard → Manage Account → Account API Tokens</em></li>
           <li>Click <em>Create Token</em></li>
-          <li>Use a <em>Custom Token</em> template</li>
-          <li>
-            Under Permissions, select
-            <em>Account → Workers Scripts → Read</em>
-          </li>
+          <li>Use the <em>Read all resources</em> template</li>
           <li>Save and paste the token above</li>
+          <li>Click the refresh button next to Account to load your accounts</li>
         </ol>
-        <p>
-          Your Account ID is on the <em>Workers &amp; Pages</em> overview page
-          in the right sidebar.
-        </p>
       </div>
     </details>
 
@@ -229,8 +230,9 @@
       let piUUID = "";
       let settings = {};
 
-      // Stream Deck calls this global function to bootstrap the PI
-      // eslint-disable-next-line no-unused-vars
+      const CF_API = "https://api.cloudflare.com/client/v4";
+      const REFRESH_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.34 13a10 10 0 1 1-2.83-7.83L21.5 8"/></svg>';
+
       function connectElgatoStreamDeckSocket(
         port,
         uuid,
@@ -240,7 +242,6 @@
       ) {
         piUUID = uuid;
 
-        // Parse initial settings from actionInfo
         try {
           const action = JSON.parse(actionInfo);
           settings = action?.payload?.settings || {};
@@ -251,15 +252,13 @@
         websocket = new WebSocket("ws://127.0.0.1:" + port);
 
         websocket.onopen = function () {
-          // Register the Property Inspector
           websocket.send(
             JSON.stringify({ event: registerEvent, uuid: uuid })
           );
-          // Populate form with saved settings
           populateForm();
-          // Auto-load workers if credentials are present
-          if (settings.apiToken && settings.accountId) {
-            loadWorkers();
+          // Auto-load chain if token is present
+          if (settings.apiToken) {
+            loadAccounts(/* then */ true);
           }
         };
 
@@ -271,7 +270,7 @@
               populateForm();
             }
           } catch {
-            // ignore parse errors
+            // ignore
           }
         };
       }
@@ -291,20 +290,21 @@
           if (el) el.value = settings[key] || "";
         });
 
-        // Ensure the saved worker name is an option in the dropdown
-        const workerSelect = document.getElementById("workerName");
-        const saved = settings.workerName || "";
-        if (
-          saved &&
-          !workerSelect.querySelector(
-            'option[value="' + CSS.escape(saved) + '"]'
-          )
-        ) {
+        // Ensure saved accountId is an option
+        ensureOption("accountId", settings.accountId);
+        // Ensure saved workerName is an option
+        ensureOption("workerName", settings.workerName);
+      }
+
+      function ensureOption(selectId, value) {
+        if (!value) return;
+        const sel = document.getElementById(selectId);
+        if (!sel.querySelector('option[value="' + CSS.escape(value) + '"]')) {
           const opt = document.createElement("option");
-          opt.value = saved;
-          opt.textContent = saved;
-          workerSelect.appendChild(opt);
-          workerSelect.value = saved;
+          opt.value = value;
+          opt.textContent = value;
+          sel.appendChild(opt);
+          sel.value = value;
         }
       }
 
@@ -325,7 +325,7 @@
         }
       }
 
-      // Bind change/input events for all fields
+      // Bind change/input events
       FIELDS.forEach(function (key) {
         var el = document.getElementById(key);
         if (el) {
@@ -334,13 +334,147 @@
         }
       });
 
+      // When account changes, auto-load workers
+      document.getElementById("accountId").addEventListener("change", function () {
+        saveSettings();
+        if (this.value) {
+          loadWorkers();
+        }
+      });
+
+      /* ───────── Shared helpers ───────── */
+
+      function cfHeaders(token) {
+        return {
+          Authorization: "Bearer " + token,
+          "Content-Type": "application/json",
+        };
+      }
+
+      function showStatus(el, msg, type) {
+        el.textContent = msg;
+        el.style.color =
+          type === "error"
+            ? "#ff6b6b"
+            : type === "success"
+              ? "#4ade80"
+              : "#969696";
+      }
+
+      function populateSelect(selectEl, items, placeholder, currentValue) {
+        selectEl.innerHTML = "";
+        var ph = document.createElement("option");
+        ph.value = "";
+        ph.textContent = placeholder;
+        selectEl.appendChild(ph);
+
+        items.forEach(function (item) {
+          var opt = document.createElement("option");
+          opt.value = item.value;
+          opt.textContent = item.label;
+          selectEl.appendChild(opt);
+        });
+
+        if (currentValue) {
+          selectEl.value = currentValue;
+        }
+      }
+
+      /* ───────── Account List Fetch ───────── */
+
+      const loadAccountsBtn = document.getElementById("loadAccountsBtn");
+      const accountSelect = document.getElementById("accountId");
+      const accountStatusDiv = document.getElementById("accountStatus");
+
+      loadAccountsBtn.addEventListener("click", function () {
+        loadAccounts(/* thenLoadWorkers */ true);
+      });
+
+      async function loadAccounts(thenLoadWorkers) {
+        const apiToken = document.getElementById("apiToken").value.trim();
+
+        if (!apiToken) {
+          showStatus(accountStatusDiv, "Enter API Token first", "error");
+          return;
+        }
+
+        loadAccountsBtn.disabled = true;
+        showStatus(accountStatusDiv, "Loading accounts…", "info");
+
+        try {
+          const resp = await fetch(CF_API + "/accounts", {
+            headers: cfHeaders(apiToken),
+          });
+
+          if (!resp.ok) {
+            var errText = "HTTP " + resp.status;
+            if (resp.status === 401 || resp.status === 403) {
+              errText = "Invalid token or insufficient permissions";
+            }
+            throw new Error(errText);
+          }
+
+          const data = await resp.json();
+
+          if (!data.success || !Array.isArray(data.result)) {
+            var msg =
+              (data.errors && data.errors[0] && data.errors[0].message) ||
+              "Unknown API error";
+            throw new Error(msg);
+          }
+
+          var currentValue = accountSelect.value;
+
+          var accounts = data.result
+            .map(function (a) {
+              return { value: a.id, label: a.name || a.id };
+            })
+            .sort(function (a, b) {
+              return a.label.localeCompare(b.label);
+            });
+
+          populateSelect(
+            accountSelect,
+            accounts,
+            "-- Select Account --",
+            currentValue
+          );
+
+          var count = accounts.length;
+          showStatus(
+            accountStatusDiv,
+            count + " account" + (count !== 1 ? "s" : "") + " found",
+            "success"
+          );
+
+          // Auto-select if only one account
+          if (accounts.length === 1 && !currentValue) {
+            accountSelect.value = accounts[0].value;
+            saveSettings();
+          }
+
+          // Chain: load workers if account is selected
+          if (thenLoadWorkers && accountSelect.value) {
+            loadWorkers();
+          }
+        } catch (err) {
+          showStatus(
+            accountStatusDiv,
+            err.message || "Failed to load accounts",
+            "error"
+          );
+        } finally {
+          loadAccountsBtn.disabled = false;
+        }
+      }
+
       /* ───────── Worker List Fetch ───────── */
 
-      const loadBtn = document.getElementById("loadWorkersBtn");
+      const loadWorkersBtn = document.getElementById("loadWorkersBtn");
       const workerSelect = document.getElementById("workerName");
-      const statusDiv = document.getElementById("workerStatus");
+      const workerStatusDiv = document.getElementById("workerStatus");
 
-      loadBtn.addEventListener("click", function () {
+      loadWorkersBtn.addEventListener("click", function () {
         loadWorkers();
       });
 
@@ -349,24 +483,20 @@
         const accountId = document.getElementById("accountId").value.trim();
 
         if (!apiToken || !accountId) {
-          showStatus("Enter API Token and Account ID first", "error");
+          showStatus(workerStatusDiv, "Select an account first", "error");
           return;
         }
 
-        loadBtn.disabled = true;
-        showStatus("Loading workers…", "info");
+        loadWorkersBtn.disabled = true;
+        showStatus(workerStatusDiv, "Loading workers…", "info");
 
         try {
           const resp = await fetch(
-            "https://api.cloudflare.com/client/v4/accounts/" +
+            CF_API +
+              "/accounts/" +
               encodeURIComponent(accountId) +
               "/workers/scripts",
-            {
-              headers: {
-                Authorization: "Bearer " + apiToken,
-                "Content-Type": "application/json",
-              },
-            }
+            { headers: cfHeaders(apiToken) }
           );
 
           if (!resp.ok) {
@@ -374,7 +504,7 @@
             if (resp.status === 401 || resp.status === 403) {
               errText = "Invalid token or insufficient permissions";
             } else if (resp.status === 404) {
-              errText = "Account not found — check Account ID";
+              errText = "Account not found";
             }
             throw new Error(errText);
           }
@@ -382,62 +512,43 @@
           const data = await resp.json();
 
           if (!data.success || !Array.isArray(data.result)) {
-            const msg =
+            var msg =
               (data.errors && data.errors[0] && data.errors[0].message) ||
               "Unknown API error";
             throw new Error(msg);
           }
 
-          const currentValue = workerSelect.value;
+          var currentValue = workerSelect.value;
 
-          // Clear dropdown
-          workerSelect.innerHTML = "";
-
-          // Placeholder option
-          const placeholder = document.createElement("option");
-          placeholder.value = "";
-          placeholder.textContent = "-- Select Worker --";
-          workerSelect.appendChild(placeholder);
-
-          // Sort workers alphabetically and populate
-          const workers = data.result
+          var workers = data.result
             .map(function (w) {
-              return w.id;
+              return { value: w.id, label: w.id };
             })
-            .sort();
+            .sort(function (a, b) {
+              return a.label.localeCompare(b.label);
+            });
 
-          workers.forEach(function (name) {
-            const opt = document.createElement("option");
-            opt.value = name;
-            opt.textContent = name;
-            workerSelect.appendChild(opt);
-          });
-
-          // Restore previous selection if it exists
-          if (currentValue) {
-            workerSelect.value = currentValue;
-          }
+          populateSelect(
+            workerSelect,
+            workers,
+            "-- Select Worker --",
+            currentValue
+          );
 
           var count = workers.length;
           showStatus(
+            workerStatusDiv,
             count + " worker" + (count !== 1 ? "s" : "") + " found",
             "success"
           );
         } catch (err) {
-          showStatus(err.message || "Failed to load workers", "error");
+          showStatus(
+            workerStatusDiv,
+            err.message || "Failed to load workers",
+            "error"
+          );
         } finally {
-          loadBtn.disabled = false;
-        }
-      }
-
-      function showStatus(msg, type) {
-        statusDiv.textContent = msg;
-        if (type === "error") {
-          statusDiv.style.color = "#ff6b6b";
-        } else if (type === "success") {
-          statusDiv.style.color = "#4ade80";
-        } else {
-          statusDiv.style.color = "#969696";
+          loadWorkersBtn.disabled = false;
         }
       }
     </script>
