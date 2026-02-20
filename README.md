@@ -7,8 +7,31 @@ Built with the [Stream Deck SDK](https://docs.elgato.com/streamdeck/sdk/introduc
 ## Features
 
 - **Cloudflare Status** — Displays the current Cloudflare system status on a Stream Deck key with automatic refresh. Press the key for an instant status check.
+- **Worker Deployment Status** — Shows the latest deployment status of a Cloudflare Worker with color-coded indicators:
+  - 🟢 **Live** — 100% on a single version
+  - 🟡 **Gradual** — Traffic split across multiple versions
+  - 🔵 **Recent** — Deployed within the last 10 minutes
+  - 🔴 **Error** — Failed to fetch status
+  - ⚫ **Unconfigured** — Missing API token, account ID, or worker name
 
 > More actions are planned — see the [Roadmap](#roadmap) section below.
+
+### Setting Up Worker Deployment Status
+
+1. Drag the **Worker Deployment Status** action onto a Stream Deck key.
+2. In the Property Inspector, enter:
+   - **API Token** — A Cloudflare API Token with **Workers Scripts Read** permission.
+   - **Account ID** — Your 32-character Cloudflare Account ID (found on the Workers & Pages overview page).
+   - **Worker Name** — The name of the Worker script to monitor.
+   - **Refresh Interval** — How often to poll (default: 60 seconds, min: 10).
+3. Press the key at any time to force an immediate refresh.
+
+#### Creating an API Token
+
+1. Go to **Cloudflare Dashboard → My Profile → API Tokens**.
+2. Click **Create Token** → use a **Custom Token** template.
+3. Under Permissions, select **Account → Workers Scripts → Read**.
+4. Save and paste the token into the action settings.
 
 ## Requirements
 
@@ -115,11 +138,14 @@ The output is a `.streamDeckPlugin` file ready for distribution.
 │   └── .sdignore                # Files to exclude from packaging
 ├── src/                         # TypeScript source
 │   ├── actions/                 # Stream Deck action implementations
-│   │   └── cloudflare-status.ts
+│   │   ├── cloudflare-status.ts
+│   │   └── worker-deployment-status.ts
 │   ├── services/                # API clients & business logic
-│   │   └── cloudflare-api-client.ts
+│   │   ├── cloudflare-api-client.ts
+│   │   └── cloudflare-workers-api.ts
 │   ├── types/                   # TypeScript type definitions
 │   │   ├── cloudflare.ts
+│   │   ├── cloudflare-workers.ts
 │   │   └── index.ts
 │   └── plugin.ts                # Plugin entry point
 ├── tests/                       # Test files (mirrors src/ structure)
@@ -147,7 +173,6 @@ Roadmap items will be discussed and tracked in [GitHub Issues](https://github.co
 - Zone analytics dashboard
 - DNS record management
 - Firewall event monitoring
-- Worker deployment status
 - Cache purge controls
 - SSL certificate expiry alerts
 

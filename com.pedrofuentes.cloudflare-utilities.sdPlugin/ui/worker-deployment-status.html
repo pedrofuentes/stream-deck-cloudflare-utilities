@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Worker Deployment Status</title>
+    <link
+      rel="stylesheet"
+      href="https://sdpi-components.dev/releases/v3/sdpi-components.css"
+    />
+    <script src="https://sdpi-components.dev/releases/v3/sdpi-components.js"></script>
+  </head>
+  <body>
+    <sdpi-item label="API Token">
+      <sdpi-textfield
+        setting="apiToken"
+        placeholder="Your Cloudflare API Token"
+        type="password"
+        required
+      ></sdpi-textfield>
+    </sdpi-item>
+
+    <sdpi-item label="Account ID">
+      <sdpi-textfield
+        setting="accountId"
+        placeholder="32-character hex Account ID"
+        required
+      ></sdpi-textfield>
+    </sdpi-item>
+
+    <sdpi-item label="Worker Name">
+      <sdpi-textfield
+        setting="workerName"
+        placeholder="my-worker"
+        required
+      ></sdpi-textfield>
+    </sdpi-item>
+
+    <sdpi-item label="Refresh (seconds)">
+      <sdpi-textfield
+        setting="refreshIntervalSeconds"
+        placeholder="60"
+        type="number"
+        min="10"
+        max="3600"
+      ></sdpi-textfield>
+    </sdpi-item>
+
+    <details>
+      <summary style="cursor: pointer; color: #969696; font-size: 11px; margin: 8px 16px;">
+        How to create an API Token
+      </summary>
+      <div style="color: #808080; font-size: 11px; margin: 4px 16px 8px;">
+        <ol style="padding-left: 16px; margin: 4px 0;">
+          <li>Go to <em>Cloudflare Dashboard → My Profile → API Tokens</em></li>
+          <li>Click <em>Create Token</em></li>
+          <li>Use a <em>Custom Token</em> template</li>
+          <li>Under Permissions, select <em>Account → Workers Scripts → Read</em></li>
+          <li>Save and paste the token above</li>
+        </ol>
+        <p style="margin: 4px 0;">
+          Your Account ID is on the <em>Workers &amp; Pages</em> overview page
+          in the right sidebar.
+        </p>
+      </div>
+    </details>
+  </body>
+</html>

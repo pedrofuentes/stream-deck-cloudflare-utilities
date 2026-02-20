@@ -1,12 +1,38 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { CloudflareStatus } from "../../src/actions/cloudflare-status";
+import { CloudflareApiClient } from "../../src/services/cloudflare-api-client";
+
+// Mock the @elgato/streamdeck module
+vi.mock("@elgato/streamdeck", () => ({
+  default: {
+    logger: {
+      error: vi.fn(),
+      setLevel: vi.fn(),
+    },
+    actions: {
+      registerAction: vi.fn(),
+    },
+    connect: vi.fn(),
+  },
+  action: () => (target: unknown) => target,
+  SingletonAction: class {},
+}));
+
+// Helper to create a mock SD event
+function makeMockEvent(settings: Record<string, unknown> = {}) {
+  return {
+    payload: { settings },
+    action: {
+      setTitle: vi.fn().mockResolvedValue(undefined),
+    },
+  } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+}
 
 describe("CloudflareStatus", () => {
   describe("formatStatusTitle", () => {
     let action: CloudflareStatus;
 
     beforeEach(() => {
-      // Create action without connecting to Stream Deck
       action = new CloudflareStatus();
     });
 
@@ -46,6 +72,95 @@ describe("CloudflareStatus", () => {
       expect(action.formatStatusTitle("degraded")).toBe("? N/A");
       expect(action.formatStatusTitle("outage")).toBe("? N/A");
       expect(action.formatStatusTitle("maintenance")).toBe("? N/A");
+    });
+  });
+
+  // ── Lifecycle Methods ────────────────────────────────────────────────────
+
+  describe("onWillAppear", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    });
+
+    it("should fetch status and set title on appear", async () => {
+      vi.useFakeTimers();
+
+      const mockClient = {
+        getSystemStatus: vi.fn().mockResolvedValue({
+          indicator: "none",
+          description: "All Systems Operational",
+        }),
+      } as unknown as CloudflareApiClient;
+
+      const action = new CloudflareStatus(mockClient);
+      const ev = makeMockEvent({ refreshIntervalSeconds: 120 });
+
+      await action.onWillAppear(ev);
+
+      expect(mockClient.getSystemStatus).toHaveBeenCalled();
+      expect(ev.action.setTitle).toHaveBeenCalledWith("✓ OK");
+
+      vi.useRealTimers();
+    });
+
+    it("should set title to ERR when API throws", async () => {
+      vi.useFakeTimers();
+
+      const mockClient = {
+        getSystemStatus: vi.fn().mockRejectedValue(new Error("API down")),
+      } as unknown as CloudflareApiClient;
+
+      const action = new CloudflareStatus(mockClient);
+      const ev = makeMockEvent({});
+
+      await action.onWillAppear(ev);
+
+      expect(ev.action.setTitle).toHaveBeenCalledWith("ERR");
+
+      vi.useRealTimers();
+    });
+  });
+
+  describe("onWillDisappear", () => {
+    it("should clean up interval without error", () => {
+      const action = new CloudflareStatus();
+      expect(() => action.onWillDisappear()).not.toThrow();
+    });
+  });
+
+  describe("onKeyDown", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("should refresh status on key press", async () => {
+      const mockClient = {
+        getSystemStatus: vi.fn().mockResolvedValue({
+          indicator: "minor",
+          description: "Minor Issue",
+        }),
+      } as unknown as CloudflareApiClient;
+
+      const action = new CloudflareStatus(mockClient);
+      const ev = makeMockEvent({});
+
+      await action.onKeyDown(ev);
+
+      expect(ev.action.setTitle).toHaveBeenCalledWith("⚠ Minor");
+    });
+
+    it("should set title to ERR on key press when API throws", async () => {
+      const mockClient = {
+        getSystemStatus: vi.fn().mockRejectedValue(new Error("Network")),
+      } as unknown as CloudflareApiClient;
+
+      const action = new CloudflareStatus(mockClient);
+      const ev = makeMockEvent({});
+
+      await action.onKeyDown(ev);
+
+      expect(ev.action.setTitle).toHaveBeenCalledWith("ERR");
     });
   });
 });

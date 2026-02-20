@@ -11,6 +11,18 @@
       ],
       "Tooltip": "Display Cloudflare system status",
       "UUID": "com.pedrofuentes.cloudflare-utilities.status"
+    },
+    {
+      "Icon": "imgs/actions/worker-deployment-status",
+      "Name": "Worker Deployment Status",
+      "PropertyInspectorPath": "ui/worker-deployment-status.html",
+      "States": [
+        {
+          "Image": "imgs/actions/worker-deployment-status"
+        }
+      ],
+      "Tooltip": "Display deployment status of a Cloudflare Worker",
+      "UUID": "com.pedrofuentes.cloudflare-utilities.worker-deployment-status"
     }
   ],
   "Author": "Pedro Fuentes",
