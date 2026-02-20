@@ -53,8 +53,6 @@
         min-width: 0;
       }
 
-      input[type="text"],
-      input[type="password"],
       input[type="number"],
       select {
         width: 100%;
@@ -78,13 +76,13 @@
         appearance: auto;
       }
 
-      .worker-row {
+      .dropdown-row {
         display: flex;
         gap: 4px;
         align-items: stretch;
       }
 
-      .worker-row select {
+      .dropdown-row select {
         flex: 1;
       }
 
@@ -122,69 +120,71 @@
         min-height: 14px;
       }
 
-      details {
-        margin: 8px 16px;
-      }
-
-      summary {
-        cursor: pointer;
-        color: var(--text-muted);
-        font-size: 11px;
-      }
-
-      .help-content {
-        color: #808080;
-        font-size: 11px;
-        margin: 4px 0 8px;
-      }
-
-      .help-content ol {
-        padding-left: 16px;
-        margin: 4px 0;
-      }
-
-      .help-content p {
-        margin: 4px 0;
-      }
-
       .separator {
         border: none;
         border-top: 1px solid var(--border);
         margin: 8px 16px;
       }
+
+      .section-heading {
+        font-size: 11px;
+        font-weight: 600;
+        color: #969696;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 4px 16px 2px;
+        margin-top: 4px;
+      }
+
+      .settings-btn {
+        display: block;
+        width: calc(100% - 32px);
+        margin: 8px 16px;
+        background: var(--bg-input);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 6px 12px;
+        cursor: pointer;
+        font-family: var(--font);
+        font-size: 12px;
+        text-align: center;
+      }
+
+      .settings-btn:hover {
+        background: #4d4d4d;
+        border-color: var(--accent);
+      }
+
+      .account-info {
+        font-size: 10px;
+        color: var(--text-muted);
+        padding: 0 16px 4px;
+        font-style: italic;
+      }
+
+      .account-info.configured {
+        color: var(--success);
+      }
+
+      .account-info.not-configured {
+        color: var(--error);
+      }
     </style>
   </head>
   <body>
-    <div class="sdpi-item">
-      <div class="sdpi-item-label">API Token</div>
-      <div class="sdpi-item-value">
-        <input
-          type="password"
-          id="apiToken"
-          placeholder="Your Cloudflare API Token"
-        />
-      </div>
-    </div>
+    <button type="button" id="openSetupBtn" class="settings-btn">
+      ⚙️ Cloudflare Account Settings
+    </button>
+    <div class="account-info" id="accountInfo">Checking account settings…</div>
 
-    <div class="sdpi-item">
-      <div class="sdpi-item-label">Account</div>
-      <div class="sdpi-item-value">
-        <div class="worker-row">
-          <select id="accountId">
-            <option value="">-- Select Account --</option>
-          </select>
-          <button type="button" id="loadAccountsBtn" class="load-btn" title="Load accounts from Cloudflare">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.34 13a10 10 0 1 1-2.83-7.83L21.5 8"/></svg>
-          </button>
-        </div>
-      </div>
-    </div>
-    <div class="status-msg" id="accountStatus"></div>
+    <hr class="separator" />
+    <div class="section-heading">Worker Settings</div>
 
     <div class="sdpi-item">
       <div class="sdpi-item-label">Worker</div>
       <div class="sdpi-item-value">
-        <div class="worker-row">
+        <div class="dropdown-row">
           <select id="workerName">
             <option value="">-- Select Worker --</option>
           </select>
@@ -209,29 +209,14 @@
       </div>
     </div>
 
-    <hr class="separator" />
-
-    <details>
-      <summary>How to create an API Token</summary>
-      <div class="help-content">
-        <ol>
-          <li>Go to <em>Cloudflare Dashboard → Manage Account → Account API Tokens</em></li>
-          <li>Click <em>Create Token</em></li>
-          <li>Use the <em>Read all resources</em> template</li>
-          <li>Save and paste the token above</li>
-          <li>Click the refresh button next to Account to load your accounts</li>
-        </ol>
-      </div>
-    </details>
-
     <script>
       /* ───────── Stream Deck WebSocket ───────── */
       let websocket = null;
       let piUUID = "";
-      let settings = {};
+      let globalSettings = {};
+      let actionSettings = {};
 
       const CF_API = "https://api.cloudflare.com/client/v4";
-      const REFRESH_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.34 13a10 10 0 1 1-2.83-7.83L21.5 8"/></svg>';
 
       function connectElgatoStreamDeckSocket(
         port,
@@ -242,32 +227,46 @@
       ) {
         piUUID = uuid;
 
+        // Expose for setup popup
+        window.piUUID = uuid;
+
         try {
           const action = JSON.parse(actionInfo);
-          settings = action?.payload?.settings || {};
+          actionSettings = action?.payload?.settings || {};
         } catch {
-          settings = {};
+          actionSettings = {};
         }
 
         websocket = new WebSocket("ws://127.0.0.1:" + port);
+
+        // Expose for setup popup
+        window.websocket = websocket;
 
         websocket.onopen = function () {
           websocket.send(
             JSON.stringify({ event: registerEvent, uuid: uuid })
           );
-          populateForm();
-          // Auto-load chain if token is present
-          if (settings.apiToken) {
-            loadAccounts(/* then */ true);
-          }
+          // Request global settings
+          websocket.send(
+            JSON.stringify({ event: "getGlobalSettings", context: uuid })
+          );
+          populateActionFields();
         };
 
         websocket.onmessage = function (evt) {
           try {
             const data = JSON.parse(evt.data);
+            if (data.event === "didReceiveGlobalSettings") {
+              globalSettings = data?.payload?.settings || {};
+              updateAccountInfo();
+              // Auto-load workers if credentials are set
+              if (globalSettings.apiToken && globalSettings.accountId && !workerSelect.value) {
+                loadWorkers();
+              }
+            }
             if (data.event === "didReceiveSettings") {
-              settings = data?.payload?.settings || {};
-              populateForm();
+              actionSettings = data?.payload?.settings || {};
+              populateActionFields();
             }
           } catch {
             // ignore
@@ -275,32 +274,55 @@
         };
       }
 
+      /* ───────── Setup Popup ───────── */
+
+      var setupPopup = null;
+
+      document.getElementById("openSetupBtn").addEventListener("click", function () {
+        if (setupPopup && !setupPopup.closed) {
+          setupPopup.focus();
+          return;
+        }
+        setupPopup = window.open(
+          "setup.html",
+          "Cloudflare Account Settings",
+          "width=500,height=350"
+        );
+      });
+
+      /* ───────── Account Info Display ───────── */
+
+      function updateAccountInfo() {
+        var el = document.getElementById("accountInfo");
+        if (globalSettings.apiToken && globalSettings.accountId) {
+          el.textContent = "✓ Account configured";
+          el.className = "account-info configured";
+        } else if (globalSettings.apiToken) {
+          el.textContent = "Token set — select an account in Settings";
+          el.className = "account-info not-configured";
+        } else {
+          el.textContent = "Not configured — click Settings above";
+          el.className = "account-info not-configured";
+        }
+      }
+
       /* ───────── Settings ↔ Form ───────── */
 
-      const FIELDS = [
-        "apiToken",
-        "accountId",
-        "workerName",
-        "refreshIntervalSeconds",
-      ];
+      const ACTION_FIELDS = ["workerName", "refreshIntervalSeconds"];
 
-      function populateForm() {
-        FIELDS.forEach(function (key) {
-          const el = document.getElementById(key);
-          if (el) el.value = settings[key] || "";
+      function populateActionFields() {
+        ACTION_FIELDS.forEach(function (key) {
+          var el = document.getElementById(key);
+          if (el) el.value = actionSettings[key] || "";
         });
-
-        // Ensure saved accountId is an option
-        ensureOption("accountId", settings.accountId);
-        // Ensure saved workerName is an option
-        ensureOption("workerName", settings.workerName);
+        ensureOption("workerName", actionSettings.workerName);
       }
 
       function ensureOption(selectId, value) {
         if (!value) return;
-        const sel = document.getElementById(selectId);
+        var sel = document.getElementById(selectId);
         if (!sel.querySelector('option[value="' + CSS.escape(value) + '"]')) {
-          const opt = document.createElement("option");
+          var opt = document.createElement("option");
           opt.value = value;
           opt.textContent = value;
           sel.appendChild(opt);
@@ -308,10 +330,10 @@
         }
       }
 
-      function saveSettings() {
-        FIELDS.forEach(function (key) {
-          const el = document.getElementById(key);
-          if (el) settings[key] = el.value;
+      function saveActionSettings() {
+        ACTION_FIELDS.forEach(function (key) {
+          var el = document.getElementById(key);
+          if (el) actionSettings[key] = el.value;
         });
 
         if (websocket && websocket.readyState === WebSocket.OPEN) {
@@ -319,26 +341,18 @@
             JSON.stringify({
               event: "setSettings",
               context: piUUID,
-              payload: settings,
+              payload: actionSettings,
             })
           );
         }
       }
 
-      // Bind change/input events
-      FIELDS.forEach(function (key) {
+      // Bind change/input events — action fields
+      ACTION_FIELDS.forEach(function (key) {
         var el = document.getElementById(key);
         if (el) {
-          el.addEventListener("input", saveSettings);
-          el.addEventListener("change", saveSettings);
-        }
-      });
-
-      // When account changes, auto-load workers
-      document.getElementById("accountId").addEventListener("change", function () {
-        saveSettings();
-        if (this.value) {
-          loadWorkers();
+          el.addEventListener("input", saveActionSettings);
+          el.addEventListener("change", saveActionSettings);
         }
       });
 
@@ -380,94 +394,6 @@
         }
       }
 
-      /* ───────── Account List Fetch ───────── */
-
-      const loadAccountsBtn = document.getElementById("loadAccountsBtn");
-      const accountSelect = document.getElementById("accountId");
-      const accountStatusDiv = document.getElementById("accountStatus");
-
-      loadAccountsBtn.addEventListener("click", function () {
-        loadAccounts(/* thenLoadWorkers */ true);
-      });
-
-      async function loadAccounts(thenLoadWorkers) {
-        const apiToken = document.getElementById("apiToken").value.trim();
-
-        if (!apiToken) {
-          showStatus(accountStatusDiv, "Enter API Token first", "error");
-          return;
-        }
-
-        loadAccountsBtn.disabled = true;
-        showStatus(accountStatusDiv, "Loading accounts…", "info");
-
-        try {
-          const resp = await fetch(CF_API + "/accounts", {
-            headers: cfHeaders(apiToken),
-          });
-
-          if (!resp.ok) {
-            var errText = "HTTP " + resp.status;
-            if (resp.status === 401 || resp.status === 403) {
-              errText = "Invalid token or insufficient permissions";
-            }
-            throw new Error(errText);
-          }
-
-          const data = await resp.json();
-
-          if (!data.success || !Array.isArray(data.result)) {
-            var msg =
-              (data.errors && data.errors[0] && data.errors[0].message) ||
-              "Unknown API error";
-            throw new Error(msg);
-          }
-
-          var currentValue = accountSelect.value;
-
-          var accounts = data.result
-            .map(function (a) {
-              return { value: a.id, label: a.name || a.id };
-            })
-            .sort(function (a, b) {
-              return a.label.localeCompare(b.label);
-            });
-
-          populateSelect(
-            accountSelect,
-            accounts,
-            "-- Select Account --",
-            currentValue
-          );
-
-          var count = accounts.length;
-          showStatus(
-            accountStatusDiv,
-            count + " account" + (count !== 1 ? "s" : "") + " found",
-            "success"
-          );
-
-          // Auto-select if only one account
-          if (accounts.length === 1 && !currentValue) {
-            accountSelect.value = accounts[0].value;
-            saveSettings();
-          }
-
-          // Chain: load workers if account is selected
-          if (thenLoadWorkers && accountSelect.value) {
-            loadWorkers();
-          }
-        } catch (err) {
-          showStatus(
-            accountStatusDiv,
-            err.message || "Failed to load accounts",
-            "error"
-          );
-        } finally {
-          loadAccountsBtn.disabled = false;
-        }
-      }
-
       /* ───────── Worker List Fetch ───────── */
 
       const loadWorkersBtn = document.getElementById("loadWorkersBtn");
@@ -479,11 +405,11 @@
       });
 
       async function loadWorkers() {
-        const apiToken = document.getElementById("apiToken").value.trim();
-        const accountId = document.getElementById("accountId").value.trim();
+        var apiToken = globalSettings.apiToken;
+        var accountId = globalSettings.accountId;
 
         if (!apiToken || !accountId) {
-          showStatus(workerStatusDiv, "Select an account first", "error");
+          showStatus(workerStatusDiv, "Configure account in Settings first", "error");
           return;
         }
 
@@ -491,7 +417,7 @@
         showStatus(workerStatusDiv, "Loading workers…", "info");
 
         try {
-          const resp = await fetch(
+          var resp = await fetch(
             CF_API +
               "/accounts/" +
               encodeURIComponent(accountId) +
@@ -509,7 +435,7 @@
             throw new Error(errText);
           }
 
-          const data = await resp.json();
+          var data = await resp.json();
 
           if (!data.success || !Array.isArray(data.result)) {
             var msg =

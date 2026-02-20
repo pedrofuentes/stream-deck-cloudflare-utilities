@@ -8,13 +8,15 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 
 import { CloudflareWorkersApi, formatTimeAgo, truncateWorkerName } from "../services/cloudflare-workers-api";
+import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, STATUS_COLORS } from "../services/key-image-renderer";
-import type { CloudflareAuthSettings, DeploymentStatus } from "../types/cloudflare-workers";
+import type { DeploymentStatus } from "../types/cloudflare-workers";
 
 /**
- * Settings for the Worker Deployment Status action.
+ * Settings for the Worker Deployment Status action (per-button).
+ * Auth credentials (apiToken, accountId) are in global settings.
  */
-export type WorkerDeploymentSettings = CloudflareAuthSettings & {
+export type WorkerDeploymentSettings = {
   /** Name of the Cloudflare Worker script to monitor */
   workerName?: string;
   /** Refresh interval in seconds (default: 60) */
@@ -53,6 +55,12 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   /** 1-second interval for ticking the seconds display. */
   private displayInterval: ReturnType<typeof setInterval> | null = null;
 
+  /** Stored event reference for re-initialization on global settings change. */
+  private lastEvent: WillAppearEvent<WorkerDeploymentSettings> | DidReceiveSettingsEvent<WorkerDeploymentSettings> | null = null;
+
+  /** Unsubscribe function for global settings listener. */
+  private unsubscribeGlobal: (() => void) | null = null;
+
   /** Ten minutes in milliseconds — threshold for "recent" highlight */
   private static readonly RECENT_THRESHOLD_MS = 10 * 60 * 1000;
 
@@ -67,14 +75,18 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    * Validates settings, creates the API client, and starts periodic refresh.
    */
   override async onWillAppear(ev: WillAppearEvent<WorkerDeploymentSettings>): Promise<void> {
-    const settings = ev.payload.settings;
+    this.lastEvent = ev;
+    this.subscribeToGlobalSettings();
 
-    if (!this.hasRequiredSettings(settings)) {
+    const settings = ev.payload.settings;
+    const global = getGlobalSettings();
+
+    if (!this.hasRequiredSettings(settings, global)) {
       await ev.action.setImage(renderPlaceholderImage());
       return;
     }
 
-    this.apiClient = new CloudflareWorkersApi(settings.apiToken!, settings.accountId!);
+    this.apiClient = new CloudflareWorkersApi(global.apiToken!, global.accountId!);
 
     // Fetch immediately, then schedule adaptive polling
     await this.updateStatus(ev);
@@ -86,6 +98,8 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    * Re-initializes the API client and restarts the refresh cycle.
    */
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<WorkerDeploymentSettings>): Promise<void> {
+    this.lastEvent = ev;
+
     // Tear down existing refresh cycle
     this.clearRefreshTimeout();
     this.clearDisplayInterval();
@@ -95,13 +109,14 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     this.lastWorkerName = null;
 
     const settings = ev.payload.settings;
+    const global = getGlobalSettings();
 
-    if (!this.hasRequiredSettings(settings)) {
+    if (!this.hasRequiredSettings(settings, global)) {
       await ev.action.setImage(renderPlaceholderImage());
       return;
     }
 
-    this.apiClient = new CloudflareWorkersApi(settings.apiToken!, settings.accountId!);
+    this.apiClient = new CloudflareWorkersApi(global.apiToken!, global.accountId!);
 
     // Fetch immediately with new settings, then schedule adaptive polling
     await this.updateStatus(ev);
@@ -120,6 +135,11 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     this.lastStatus = null;
     this.lastWorkerName = null;
     this.actionRef = null;
+    this.lastEvent = null;
+    if (this.unsubscribeGlobal) {
+      this.unsubscribeGlobal();
+      this.unsubscribeGlobal = null;
+    }
   }
 
   /**
@@ -127,14 +147,15 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    */
   override async onKeyDown(ev: KeyDownEvent<WorkerDeploymentSettings>): Promise<void> {
     const settings = ev.payload.settings;
+    const global = getGlobalSettings();
 
-    if (!this.hasRequiredSettings(settings)) {
+    if (!this.hasRequiredSettings(settings, global)) {
       // Nothing to do — configuration happens in the Property Inspector
       return;
     }
 
     // Recreate client in case settings changed
-    this.apiClient = new CloudflareWorkersApi(settings.apiToken!, settings.accountId!);
+    this.apiClient = new CloudflareWorkersApi(global.apiToken!, global.accountId!);
     await this.updateStatus(ev);
   }
 
@@ -262,8 +283,9 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   /**
    * Checks whether the required settings are present.
    */
-  private hasRequiredSettings(settings: WorkerDeploymentSettings): boolean {
-    return !!(settings.apiToken && settings.accountId && settings.workerName);
+  private hasRequiredSettings(settings: WorkerDeploymentSettings, global?: { apiToken?: string; accountId?: string }): boolean {
+    const g = global ?? getGlobalSettings();
+    return !!(g.apiToken && g.accountId && settings.workerName);
   }
 
   /**
@@ -367,5 +389,39 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       clearInterval(this.displayInterval);
       this.displayInterval = null;
     }
+  }
+
+  /**
+   * Subscribes to global settings changes so the action re-initializes
+   * when the user saves credentials in the setup window.
+   */
+  private subscribeToGlobalSettings(): void {
+    if (this.unsubscribeGlobal) return; // already subscribed
+
+    this.unsubscribeGlobal = onGlobalSettingsChanged(async () => {
+      if (!this.lastEvent) return;
+
+      // Re-run the same flow as onDidReceiveSettings
+      this.clearRefreshTimeout();
+      this.clearDisplayInterval();
+      this.apiClient = null;
+      this.lastState = null;
+      this.lastStatus = null;
+      this.lastWorkerName = null;
+
+      const ev = this.lastEvent;
+      const settings = ev.payload.settings;
+      const global = getGlobalSettings();
+
+      if (!this.hasRequiredSettings(settings, global)) {
+        await ev.action.setImage(renderPlaceholderImage());
+        return;
+      }
+
+      this.apiClient = new CloudflareWorkersApi(global.apiToken!, global.accountId!);
+
+      await this.updateStatus(ev);
+      this.scheduleRefresh(ev);
+    });
   }
 }

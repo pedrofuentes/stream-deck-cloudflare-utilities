@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { WorkerDeploymentStatus } from "../../src/actions/worker-deployment-status";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
 import type { DeploymentStatus } from "../../src/types/cloudflare-workers";
+import { getGlobalSettings } from "../../src/services/global-settings-store";
 
 // Mock the @elgato/streamdeck module
 vi.mock("@elgato/streamdeck", () => ({
@@ -36,6 +37,12 @@ vi.mock("../../src/services/cloudflare-workers-api", async (importOriginal) => {
   };
 });
 
+// Mock the global settings store
+vi.mock("../../src/services/global-settings-store", () => ({
+  getGlobalSettings: vi.fn(),
+  onGlobalSettingsChanged: vi.fn().mockReturnValue(vi.fn()),
+}));
+
 // Helper to create a mock SD event
 function makeMockEvent(settings: Record<string, unknown> = {}) {
   return {
@@ -57,6 +64,7 @@ describe("WorkerDeploymentStatus", () => {
 
   beforeEach(() => {
     action = new WorkerDeploymentStatus();
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "tok", accountId: "acc" });
   });
 
   // -- resolveState --
@@ -284,7 +292,8 @@ describe("WorkerDeploymentStatus", () => {
     });
 
     it("should show placeholder when apiToken is missing", async () => {
-      const ev = makeMockEvent({ accountId: "acc", workerName: "w" });
+      vi.mocked(getGlobalSettings).mockReturnValue({ accountId: "acc" });
+      const ev = makeMockEvent({ workerName: "w" });
       await action.onWillAppear(ev);
       expect(ev.action.setImage).toHaveBeenCalledTimes(1);
       const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
@@ -292,7 +301,8 @@ describe("WorkerDeploymentStatus", () => {
     });
 
     it("should show placeholder when accountId is missing", async () => {
-      const ev = makeMockEvent({ apiToken: "tok", workerName: "w" });
+      vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "tok" });
+      const ev = makeMockEvent({ workerName: "w" });
       await action.onWillAppear(ev);
       expect(ev.action.setImage).toHaveBeenCalledTimes(1);
       const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
@@ -300,7 +310,7 @@ describe("WorkerDeploymentStatus", () => {
     });
 
     it("should show placeholder when workerName is missing", async () => {
-      const ev = makeMockEvent({ apiToken: "tok", accountId: "acc" });
+      const ev = makeMockEvent({});
       await action.onWillAppear(ev);
       expect(ev.action.setImage).toHaveBeenCalledTimes(1);
       const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
@@ -308,6 +318,7 @@ describe("WorkerDeploymentStatus", () => {
     });
 
     it("should show placeholder when all settings are empty", async () => {
+      vi.mocked(getGlobalSettings).mockReturnValue({});
       const ev = makeMockEvent({});
       await action.onWillAppear(ev);
       expect(ev.action.setImage).toHaveBeenCalledTimes(1);
@@ -328,8 +339,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
         refreshIntervalSeconds: 120,
       });
@@ -350,8 +359,6 @@ describe("WorkerDeploymentStatus", () => {
       mockGetDeploymentStatus = vi.fn().mockRejectedValue(new Error("API down"));
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
       });
 
@@ -369,8 +376,6 @@ describe("WorkerDeploymentStatus", () => {
       mockGetDeploymentStatus = vi.fn().mockResolvedValue(null);
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
       });
 
@@ -397,7 +402,7 @@ describe("WorkerDeploymentStatus", () => {
     });
 
     it("should show placeholder when new settings are incomplete", async () => {
-      const ev = makeMockEvent({ apiToken: "tok" });
+      const ev = makeMockEvent({});
       await action.onDidReceiveSettings(ev);
       expect(ev.action.setImage).toHaveBeenCalledTimes(1);
       const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
@@ -425,8 +430,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
         refreshIntervalSeconds: 120,
       });
@@ -446,8 +449,6 @@ describe("WorkerDeploymentStatus", () => {
       mockGetDeploymentStatus = vi.fn().mockRejectedValue(new Error("bad token"));
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
       });
 
@@ -472,8 +473,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev1 = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "worker-a",
         refreshIntervalSeconds: 60,
       });
@@ -481,8 +480,6 @@ describe("WorkerDeploymentStatus", () => {
       expect(mockGetDeploymentStatus).toHaveBeenCalledWith("worker-a");
 
       const ev2 = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "worker-b",
         refreshIntervalSeconds: 60,
       });
@@ -505,8 +502,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev1 = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
       });
       await action.onDidReceiveSettings(ev1);
@@ -543,8 +538,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "worker",
       });
 
@@ -559,8 +552,6 @@ describe("WorkerDeploymentStatus", () => {
       mockGetDeploymentStatus = vi.fn().mockRejectedValue(new Error("timeout"));
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "worker",
       });
 
@@ -626,8 +617,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
         refreshIntervalSeconds: 120,
       });
@@ -654,8 +643,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
         refreshIntervalSeconds: 120,
       });
@@ -678,8 +665,6 @@ describe("WorkerDeploymentStatus", () => {
       mockGetDeploymentStatus = vi.fn().mockRejectedValue(new Error("fail"));
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
         refreshIntervalSeconds: 60,
       });
@@ -710,8 +695,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
         refreshIntervalSeconds: 300,
       });
@@ -750,8 +733,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
         refreshIntervalSeconds: 60,
       });
@@ -791,8 +772,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
         refreshIntervalSeconds: 120,
       });
@@ -830,8 +809,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
         refreshIntervalSeconds: 300,
       });
@@ -876,8 +853,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
         refreshIntervalSeconds: 120,
       });
@@ -898,8 +873,6 @@ describe("WorkerDeploymentStatus", () => {
       mockGetDeploymentStatus = vi.fn().mockRejectedValue(new Error("fail"));
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
         refreshIntervalSeconds: 60,
       });
@@ -928,8 +901,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
         refreshIntervalSeconds: 120,
       });
@@ -964,8 +935,6 @@ describe("WorkerDeploymentStatus", () => {
       });
 
       const ev = makeMockEvent({
-        apiToken: "tok",
-        accountId: "acc",
         workerName: "my-api",
         refreshIntervalSeconds: 120,
       });
