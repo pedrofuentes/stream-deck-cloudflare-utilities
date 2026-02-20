@@ -48,15 +48,18 @@ export type KeyImageOptions = {
  * Renders a data URI for a 144×144 SVG key image.
  *
  * Layout:
- *   ┌──────────────────────┐
- *   │                      │
- *   │   line1 (16px)       │   ← identifier, dimmed
- *   │                      │
- *   │  ● line2 (22px)      │   ← main status, bold, with colored dot
- *   │                      │
- *   │   line3 (13px)       │   ← metadata, dimmed
- *   │                      │
- *   └──────────────────────┘
+ *   ┌════════════════════════┐  ← colored accent bar (6 px)
+ *   │                        │
+ *   │     line1 (18px)       │  ← identifier, dimmed, centered
+ *   │                        │
+ *   │     LINE2 (30px)       │  ← main status, bold, white, centered
+ *   │                        │
+ *   │     line3 (15px)       │  ← metadata, dimmed, centered
+ *   │                        │
+ *   └────────────────────────┘
+ *
+ * The colored accent bar at the top replaces the small status dot,
+ * making the status indicator far more visible on a tiny OLED screen.
  */
 export function renderKeyImage(options: KeyImageOptions): string {
   const bg = options.bgColor ?? BG_COLOR;
@@ -64,23 +67,41 @@ export function renderKeyImage(options: KeyImageOptions): string {
   const line2 = escapeXml(options.line2);
   const line3 = options.line3 ? escapeXml(options.line3) : "";
 
-  // Vertical positioning: center the content block
-  // With line1 + line2 + line3: y positions 38, 80, 118
-  // Without line1: y positions shift up
   const hasLine1 = !!options.line1;
   const hasLine3 = !!options.line3;
 
-  const line1Y = 38;
-  const line2Y = hasLine1 ? 80 : 72;
-  const dotY = line2Y;
-  const line3Y = hasLine3 ? (hasLine1 ? 118 : 110) : 0;
+  // Vertical centering depending on which lines are present
+  // The accent bar occupies the top 6 px, so content starts below it.
+  let line1Y: number, line2Y: number, line3Y: number;
+
+  if (hasLine1 && hasLine3) {
+    // 3-line layout
+    line1Y = 46;
+    line2Y = 88;
+    line3Y = 124;
+  } else if (hasLine1) {
+    // 2-line: name + status
+    line1Y = 56;
+    line2Y = 100;
+    line3Y = 0;
+  } else if (hasLine3) {
+    // 2-line: status + detail
+    line1Y = 0;
+    line2Y = 70;
+    line3Y = 112;
+  } else {
+    // 1-line: status only
+    line1Y = 0;
+    line2Y = 86;
+    line3Y = 0;
+  }
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
   <rect width="144" height="144" rx="16" fill="${bg}"/>
-  ${hasLine1 ? `<text x="72" y="${line1Y}" text-anchor="middle" fill="${TEXT_SECONDARY}" font-size="16" font-family="Arial,Helvetica,sans-serif">${line1}</text>` : ""}
-  <circle cx="18" cy="${dotY - 7}" r="7" fill="${options.statusColor}"/>
-  <text x="32" y="${line2Y}" fill="${TEXT_PRIMARY}" font-size="22" font-weight="bold" font-family="Arial,Helvetica,sans-serif">${line2}</text>
-  ${hasLine3 ? `<text x="72" y="${line3Y}" text-anchor="middle" fill="${TEXT_SECONDARY}" font-size="13" font-family="Arial,Helvetica,sans-serif">${line3}</text>` : ""}
+  <rect y="0" width="144" height="6" rx="3" fill="${options.statusColor}"/>
+  ${hasLine1 ? `<text x="72" y="${line1Y}" text-anchor="middle" fill="${TEXT_SECONDARY}" font-size="18" font-family="Arial,Helvetica,sans-serif">${line1}</text>` : ""}
+  <text x="72" y="${line2Y}" text-anchor="middle" fill="${TEXT_PRIMARY}" font-size="30" font-weight="bold" font-family="Arial,Helvetica,sans-serif">${line2}</text>
+  ${hasLine3 ? `<text x="72" y="${line3Y}" text-anchor="middle" fill="${TEXT_SECONDARY}" font-size="15" font-family="Arial,Helvetica,sans-serif">${line3}</text>` : ""}
 </svg>`;
 
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;

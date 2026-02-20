@@ -85,11 +85,13 @@ describe("key-image-renderer", () => {
       expect(svg).toContain('fill="#ff0000"');
     });
 
-    it("should include the status color as a circle", () => {
+    it("should include the status color as an accent bar", () => {
       const result = renderKeyImage({ line2: "OK", statusColor: STATUS_COLORS.amber });
       const svg = decodeSvg(result);
       expect(svg).toContain(`fill="${STATUS_COLORS.amber}"`);
-      expect(svg).toContain("<circle");
+      // Accent bar is a rect, not a circle
+      const rects = svg.match(/<rect /g) ?? [];
+      expect(rects.length).toBeGreaterThanOrEqual(2); // bg rect + accent bar rect
     });
 
     it("should render line2 text", () => {
@@ -206,10 +208,10 @@ describe("key-image-renderer", () => {
       expect(svg).toContain('font-weight="bold"');
     });
 
-    it("should use font-size 22 for line2", () => {
+    it("should use font-size 30 for line2", () => {
       const result = renderKeyImage({ line2: "Live", statusColor: STATUS_COLORS.green });
       const svg = decodeSvg(result);
-      expect(svg).toContain('font-size="22"');
+      expect(svg).toContain('font-size="30"');
     });
   });
 
