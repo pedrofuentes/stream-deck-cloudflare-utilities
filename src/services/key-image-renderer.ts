@@ -10,6 +10,10 @@
  * Usage:
  *   const dataUri = renderKeyImage({ ... });
  *   await ev.action.setImage(dataUri);
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
  */
 
 // ── Color Palette ──────────────────────────────────────────────────────────

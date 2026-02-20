@@ -1,4 +1,12 @@
 /**
+ * Cloudflare Workers API type definitions.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
+
+/**
  * Settings required for authenticated Cloudflare API actions.
  * These are entered by the user in the Property Inspector.
  */

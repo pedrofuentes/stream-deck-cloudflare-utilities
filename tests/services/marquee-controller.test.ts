@@ -1,3 +1,10 @@
+/**
+ * Tests for the marquee controller.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
 import { describe, it, expect } from "vitest";
 import { MarqueeController, MARQUEE_PAUSE_TICKS, MARQUEE_SEPARATOR } from "../../src/services/marquee-controller";
 

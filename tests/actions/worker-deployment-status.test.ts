@@ -1,3 +1,10 @@
+/**
+ * Tests for the Worker Deployment Status action.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { WorkerDeploymentStatus } from "../../src/actions/worker-deployment-status";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";

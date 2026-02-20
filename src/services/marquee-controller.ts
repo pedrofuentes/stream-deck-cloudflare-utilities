@@ -18,6 +18,10 @@
  *   offset 7:  "gateway  •"    ← bullet visible
  *   ...
  *   offset 19: back to "kleine-gat" (full loop)
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
  */
 
 /** Number of ticks to pause at the start of each scroll cycle. */

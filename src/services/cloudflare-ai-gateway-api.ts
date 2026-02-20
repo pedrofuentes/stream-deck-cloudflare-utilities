@@ -1,3 +1,13 @@
+/**
+ * Cloudflare AI Gateway API client.
+ *
+ * GraphQL and REST client for querying AI Gateway metrics,
+ * listing gateways, and retrieving log counts.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
 import type {
   AiGateway,
   AiGatewayListResponse,

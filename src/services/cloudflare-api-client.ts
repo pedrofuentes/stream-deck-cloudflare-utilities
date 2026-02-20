@@ -1,3 +1,13 @@
+/**
+ * Cloudflare Status API client.
+ *
+ * Fetches system status from the public Cloudflare Status API.
+ * No authentication required.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
 import type {
   CloudflareSystemStatus,
   CloudflareComponent,

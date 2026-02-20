@@ -1,4 +1,12 @@
 /**
+ * Cloudflare Status API type definitions.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
+
+/**
  * Represents the overall system status from Cloudflare's status page.
  */
 export interface CloudflareSystemStatus {

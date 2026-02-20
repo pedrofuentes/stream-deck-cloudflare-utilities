@@ -1,3 +1,13 @@
+/**
+ * Worker Deployment Status action for Stream Deck.
+ *
+ * Shows the latest deployment status of a Cloudflare Worker with
+ * color-coded indicators and automatic refresh.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
 import streamDeck, {
   action,
   DidReceiveSettingsEvent,

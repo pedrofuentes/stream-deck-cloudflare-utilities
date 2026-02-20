@@ -1,3 +1,10 @@
+/**
+ * Entry point — registers Stream Deck actions and connects to the SDK.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
 import streamDeck from "@elgato/streamdeck";
 
 import { AiGatewayMetric } from "./actions/ai-gateway-metric";

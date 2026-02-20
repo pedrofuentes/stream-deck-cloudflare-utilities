@@ -1,3 +1,10 @@
+/**
+ * Tests for the global settings store.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   getGlobalSettings,

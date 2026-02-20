@@ -1,3 +1,13 @@
+/**
+ * Cloudflare Status action for Stream Deck.
+ *
+ * Displays the current Cloudflare system status with automatic refresh.
+ * Press the key for an instant status check.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
 import streamDeck, {
   action,
   KeyDownEvent,

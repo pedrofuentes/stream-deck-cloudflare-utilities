@@ -1,3 +1,12 @@
+/**
+ * Cloudflare Workers API client.
+ *
+ * Fetches worker scripts and deployment information from the Cloudflare API.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
 import type {
   WorkerDeployment,
   WorkerDeploymentsApiResponse,

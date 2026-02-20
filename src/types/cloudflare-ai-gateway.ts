@@ -2,6 +2,10 @@
  * Types for the Cloudflare AI Gateway API.
  *
  * @see https://developers.cloudflare.com/api/resources/ai_gateway/
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
  */
 
 /**

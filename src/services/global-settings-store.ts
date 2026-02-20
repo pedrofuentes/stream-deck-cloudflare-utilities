@@ -6,6 +6,10 @@
  *
  * Plugin.ts keeps this store in sync with Stream Deck's global settings.
  * Actions read from it whenever they need credentials.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
  */
 
 /**

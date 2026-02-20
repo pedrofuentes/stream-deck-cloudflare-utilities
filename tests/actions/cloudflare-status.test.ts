@@ -1,3 +1,10 @@
+/**
+ * Tests for the Cloudflare Status action.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { CloudflareStatus } from "../../src/actions/cloudflare-status";
 import { CloudflareApiClient } from "../../src/services/cloudflare-api-client";

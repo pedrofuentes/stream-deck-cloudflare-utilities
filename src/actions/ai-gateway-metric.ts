@@ -1,3 +1,13 @@
+/**
+ * AI Gateway Metric action for Stream Deck.
+ *
+ * Displays real-time metrics from a Cloudflare AI Gateway with
+ * adaptive polling, marquee scrolling, and metric cycling via key press.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
 import streamDeck, {
   action,
   DidReceiveSettingsEvent,

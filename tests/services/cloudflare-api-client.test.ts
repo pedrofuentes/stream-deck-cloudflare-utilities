@@ -1,3 +1,10 @@
+/**
+ * Tests for the Cloudflare Status API client.
+ *
+ * @author Pedro Fuentes <git@pedrofuent.es>
+ * @copyright Pedro Pablo Fuentes Schuster
+ * @license MIT
+ */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { CloudflareApiClient } from "../../src/services/cloudflare-api-client";
 import type { CloudflareStatusApiResponse } from "../../src/types/cloudflare";
