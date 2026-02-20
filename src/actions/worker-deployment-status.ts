@@ -45,6 +45,14 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   private refreshTimeout: ReturnType<typeof setTimeout> | null = null;
   private lastState: StatusState | null = null;
 
+  /** Cached data for display-only refreshes (no API call). */
+  private lastStatus: DeploymentStatus | null = null;
+  private lastWorkerName: string | null = null;
+  private actionRef: { setImage(image: string): Promise<void> } | null = null;
+
+  /** 1-second interval for ticking the seconds display. */
+  private displayInterval: ReturnType<typeof setInterval> | null = null;
+
   /** Ten minutes in milliseconds — threshold for "recent" highlight */
   private static readonly RECENT_THRESHOLD_MS = 10 * 60 * 1000;
 
@@ -80,8 +88,11 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<WorkerDeploymentSettings>): Promise<void> {
     // Tear down existing refresh cycle
     this.clearRefreshTimeout();
+    this.clearDisplayInterval();
     this.apiClient = null;
     this.lastState = null;
+    this.lastStatus = null;
+    this.lastWorkerName = null;
 
     const settings = ev.payload.settings;
 
@@ -103,8 +114,12 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    */
   override onWillDisappear(_ev: WillDisappearEvent<WorkerDeploymentSettings>): void {
     this.clearRefreshTimeout();
+    this.clearDisplayInterval();
     this.apiClient = null;
     this.lastState = null;
+    this.lastStatus = null;
+    this.lastWorkerName = null;
+    this.actionRef = null;
   }
 
   /**
@@ -146,9 +161,15 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
 
       const state = this.resolveState(status);
       this.lastState = state;
+      this.lastStatus = status;
+      this.lastWorkerName = settings.workerName ?? null;
+      this.actionRef = ev.action as unknown as { setImage(image: string): Promise<void> };
       await ev.action.setImage(this.renderStatus(state, settings.workerName, undefined, status));
+      this.startDisplayRefresh();
     } catch (error) {
       this.lastState = "error";
+      this.lastStatus = null;
+      this.clearDisplayInterval();
       streamDeck.logger.error(`Failed to fetch deployment status for "${settings.workerName}":`, error);
       await ev.action.setImage(this.renderStatus("error", settings.workerName));
     }
@@ -289,6 +310,62 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     if (this.refreshTimeout) {
       clearTimeout(this.refreshTimeout);
       this.refreshTimeout = null;
+    }
+  }
+
+  /**
+   * Starts a 1-second display refresh interval so that the seconds counter
+   * ("45s → 46s → 47s") ticks smoothly without waiting for the next API poll.
+   *
+   * The interval automatically stops when the display moves past seconds
+   * (into minutes/hours) or when the state changes.
+   */
+  private startDisplayRefresh(): void {
+    this.clearDisplayInterval();
+
+    if (!this.lastStatus || !this.actionRef || !this.lastWorkerName) return;
+
+    // Only tick when the display is showing seconds
+    if (!this.isShowingSeconds()) return;
+
+    this.displayInterval = setInterval(async () => {
+      if (!this.lastStatus || !this.actionRef || !this.lastWorkerName) {
+        this.clearDisplayInterval();
+        return;
+      }
+
+      // Re-resolve state in case recent → live transition happened
+      const state = this.resolveState(this.lastStatus);
+      if (state !== this.lastState) {
+        this.lastState = state;
+      }
+
+      await this.actionRef.setImage(
+        this.renderStatus(state, this.lastWorkerName!, undefined, this.lastStatus)
+      );
+
+      // Stop ticking once we're past seconds display
+      if (!this.isShowingSeconds()) {
+        this.clearDisplayInterval();
+      }
+    }, 1000);
+  }
+
+  /**
+   * Returns true if the cached status would display seconds (e.g., "45s").
+   */
+  private isShowingSeconds(): boolean {
+    if (!this.lastStatus) return false;
+    return formatTimeAgo(this.lastStatus.createdOn).endsWith("s");
+  }
+
+  /**
+   * Clears the 1-second display refresh interval.
+   */
+  private clearDisplayInterval(): void {
+    if (this.displayInterval) {
+      clearInterval(this.displayInterval);
+      this.displayInterval = null;
     }
   }
 }

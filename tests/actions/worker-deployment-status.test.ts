@@ -767,4 +767,221 @@ describe("WorkerDeploymentStatus", () => {
       vi.useRealTimers();
     });
   });
+
+  // -- Display Refresh (seconds tick) --
+
+  describe("display refresh", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    });
+
+    it("should tick every second when deployment is seconds-old", async () => {
+      vi.useFakeTimers();
+
+      // Deploy 10 seconds ago → shows "10s"
+      const tenSecsAgo = new Date(Date.now() - 10_000).toISOString();
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: tenSecsAgo,
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      const ev = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+        refreshIntervalSeconds: 120,
+      });
+
+      await action.onWillAppear(ev);
+      // Initial render from API call
+      expect(ev.action.setImage).toHaveBeenCalledTimes(1);
+      const firstSvg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
+      expect(firstSvg).toContain("10s");
+
+      // After 1 second the display should refresh (no API call)
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(2);
+      const secondSvg = decodeSvg(ev.action.setImage.mock.calls[1][0]);
+      expect(secondSvg).toContain("11s");
+
+      // Still only 1 API call — the display refresh is cosmetic
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
+
+      vi.useRealTimers();
+    });
+
+    it("should stop ticking once display moves past seconds to minutes", async () => {
+      vi.useFakeTimers();
+
+      // Deploy 58 seconds ago → shows "58s", will cross into "1m" in 2s
+      const fiftyEightSecsAgo = new Date(Date.now() - 58_000).toISOString();
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: fiftyEightSecsAgo,
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      const ev = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+        refreshIntervalSeconds: 300,
+      });
+
+      await action.onWillAppear(ev);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(1);
+
+      // +1s → "59s" (still ticking)
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(2);
+      const at59 = decodeSvg(ev.action.setImage.mock.calls[1][0]);
+      expect(at59).toContain("59s");
+
+      // +1s → "1m" (transitions to minutes, tick should stop after this render)
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(3);
+      const at1m = decodeSvg(ev.action.setImage.mock.calls[2][0]);
+      expect(at1m).toContain("1m");
+
+      // Record call count — no more display ticks should happen
+      const callsAfterStop = ev.action.setImage.mock.calls.length;
+
+      // +5s — should NOT increment (display timer stopped)
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(callsAfterStop);
+
+      vi.useRealTimers();
+    });
+
+    it("should not start display timer for old deployments (minutes/hours)", async () => {
+      vi.useFakeTimers();
+
+      // Deploy 5 minutes ago → shows "5m", no seconds to tick
+      const fiveMinAgo = new Date(Date.now() - 5 * 60_000).toISOString();
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: fiveMinAgo,
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      const ev = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+        refreshIntervalSeconds: 120,
+      });
+
+      await action.onWillAppear(ev);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(1);
+
+      // +3s — no display tick expected
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(1);
+
+      vi.useRealTimers();
+    });
+
+    it("should not start display timer on error", async () => {
+      vi.useFakeTimers();
+
+      mockGetDeploymentStatus = vi.fn().mockRejectedValue(new Error("fail"));
+
+      const ev = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+        refreshIntervalSeconds: 60,
+      });
+
+      await action.onWillAppear(ev);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(1);
+
+      // +3s — no display tick on error state
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(1);
+
+      vi.useRealTimers();
+    });
+
+    it("should stop display timer on disappear", async () => {
+      vi.useFakeTimers();
+
+      const fiveSecsAgo = new Date(Date.now() - 5_000).toISOString();
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: fiveSecsAgo,
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      const ev = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+        refreshIntervalSeconds: 120,
+      });
+
+      await action.onWillAppear(ev);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(1);
+
+      // Confirm ticking
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(2);
+
+      // Disappear stops the display timer
+      action.onWillDisappear(ev);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(2);
+
+      vi.useRealTimers();
+    });
+
+    it("should tick for gradual deployments showing seconds", async () => {
+      vi.useFakeTimers();
+
+      const twentySecsAgo = new Date(Date.now() - 20_000).toISOString();
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: false,
+        isGradual: true,
+        createdOn: twentySecsAgo,
+        source: "wrangler",
+        versionSplit: "60/40",
+        deploymentId: "dep-1",
+      });
+
+      const ev = makeMockEvent({
+        apiToken: "tok",
+        accountId: "acc",
+        workerName: "my-api",
+        refreshIntervalSeconds: 120,
+      });
+
+      await action.onWillAppear(ev);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(1);
+      const firstSvg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
+      expect(firstSvg).toContain("20s");
+      expect(firstSvg).toContain(STATUS_COLORS.orange);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(ev.action.setImage).toHaveBeenCalledTimes(2);
+      const secondSvg = decodeSvg(ev.action.setImage.mock.calls[1][0]);
+      expect(secondSvg).toContain("21s");
+
+      vi.useRealTimers();
+    });
+  });
 });
