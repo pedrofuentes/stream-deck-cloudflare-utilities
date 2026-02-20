@@ -1,6 +1,6 @@
 # Stream Deck Cloudflare Utilities
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/pedrofuentes/stream-deck-cloudflare-utilities/releases)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://github.com/pedrofuentes/stream-deck-cloudflare-utilities/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-425%20passing-brightgreen.svg)](#)
 
