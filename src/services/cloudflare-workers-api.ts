@@ -1,6 +1,8 @@
 import type {
   WorkerDeployment,
   WorkerDeploymentsApiResponse,
+  WorkerScript,
+  WorkerScriptsApiResponse,
   WorkerVersion,
   WorkerVersionsApiResponse,
   DeploymentStatus,
@@ -24,6 +26,37 @@ export class CloudflareWorkersApi {
     this.apiToken = apiToken;
     this.accountId = accountId;
     this.baseUrl = baseUrl ?? CLOUDFLARE_API_BASE;
+  }
+
+  /**
+   * Fetches the list of Worker scripts for the account.
+   *
+   * @returns Array of worker scripts, sorted alphabetically by name
+   * @throws {Error} If the API request fails
+   */
+  async listWorkers(): Promise<WorkerScript[]> {
+    const url = `${this.baseUrl}/accounts/${this.accountId}/workers/scripts`;
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${this.apiToken}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch workers: HTTP ${response.status} ${response.statusText}`
+      );
+    }
+
+    const data = (await response.json()) as WorkerScriptsApiResponse;
+
+    if (!data.success) {
+      const errorMsg = data.errors?.map((e) => e.message).join(", ") || "Unknown API error";
+      throw new Error(`Cloudflare API error: ${errorMsg}`);
+    }
+
+    return data.result.sort((a, b) => a.id.localeCompare(b.id));
   }
 
   /**

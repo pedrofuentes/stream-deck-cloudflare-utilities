@@ -95,6 +95,28 @@ export interface WorkerVersionsApiResponse {
 }
 
 /**
+ * Minimal representation of a Worker script from the list endpoint.
+ */
+export interface WorkerScript {
+  /** Script name (also used as identifier) */
+  id: string;
+  /** ISO 8601 datetime when the script was created */
+  created_on: string;
+  /** ISO 8601 datetime when the script was last modified */
+  modified_on: string;
+}
+
+/**
+ * API response shape from GET /accounts/{account_id}/workers/scripts
+ */
+export interface WorkerScriptsApiResponse {
+  success: boolean;
+  errors: Array<{ code: number; message: string }>;
+  messages: Array<{ code: number; message: string }>;
+  result: WorkerScript[];
+}
+
+/**
  * Processed deployment status used internally by the action.
  */
 export interface DeploymentStatus {

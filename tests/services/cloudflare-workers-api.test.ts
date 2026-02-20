@@ -563,6 +563,97 @@ describe("CloudflareWorkersApi", () => {
       expect(status.deploymentId).toBe("dep-abc");
     });
   });
+
+  // ── listWorkers ──────────────────────────────────────────────────────────
+
+  describe("listWorkers", () => {
+    it("should fetch and return workers sorted alphabetically", async () => {
+      mockOkFetch({
+        success: true,
+        errors: [],
+        messages: [],
+        result: [
+          { id: "worker-c", created_on: "2025-01-01T00:00:00Z", modified_on: "2025-01-01T00:00:00Z" },
+          { id: "worker-a", created_on: "2025-01-01T00:00:00Z", modified_on: "2025-01-01T00:00:00Z" },
+          { id: "worker-b", created_on: "2025-01-01T00:00:00Z", modified_on: "2025-01-01T00:00:00Z" },
+        ],
+      });
+
+      const workers = await client.listWorkers();
+
+      expect(workers).toHaveLength(3);
+      expect(workers[0].id).toBe("worker-a");
+      expect(workers[1].id).toBe("worker-b");
+      expect(workers[2].id).toBe("worker-c");
+    });
+
+    it("should call the correct URL", async () => {
+      mockOkFetch({ success: true, errors: [], messages: [], result: [] });
+
+      await client.listWorkers();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://mock-api.test/accounts/test-account-id/workers/scripts",
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: "Bearer test-token",
+          }),
+        })
+      );
+    });
+
+    it("should return empty array when no workers exist", async () => {
+      mockOkFetch({ success: true, errors: [], messages: [], result: [] });
+
+      const workers = await client.listWorkers();
+
+      expect(workers).toEqual([]);
+    });
+
+    it("should throw on HTTP error", async () => {
+      mockErrorFetch(403, "Forbidden");
+
+      await expect(client.listWorkers()).rejects.toThrow(
+        "Failed to fetch workers: HTTP 403 Forbidden"
+      );
+    });
+
+    it("should throw on API error (success=false)", async () => {
+      mockOkFetch({
+        success: false,
+        errors: [{ code: 10000, message: "Authentication error" }],
+        messages: [],
+        result: [],
+      });
+
+      await expect(client.listWorkers()).rejects.toThrow(
+        "Cloudflare API error: Authentication error"
+      );
+    });
+
+    it("should throw on network failure", async () => {
+      mockFetch.mockRejectedValueOnce(new Error("Network error"));
+
+      await expect(client.listWorkers()).rejects.toThrow("Network error");
+    });
+
+    it("should use custom base URL", async () => {
+      const customClient = new CloudflareWorkersApi(
+        "tok",
+        "acc",
+        "https://custom.api.test"
+      );
+
+      mockOkFetch({ success: true, errors: [], messages: [], result: [] });
+
+      await customClient.listWorkers();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://custom.api.test/accounts/acc/workers/scripts",
+        expect.anything()
+      );
+    });
+  });
 });
 
 // ── formatTimeAgo ────────────────────────────────────────────────────────────

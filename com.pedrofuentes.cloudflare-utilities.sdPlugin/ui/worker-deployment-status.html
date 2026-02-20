@@ -3,65 +3,443 @@
   <head>
     <meta charset="utf-8" />
     <title>Worker Deployment Status</title>
-    <link
-      rel="stylesheet"
-      href="https://sdpi-components.dev/releases/v3/sdpi-components.css"
-    />
-    <script src="https://sdpi-components.dev/releases/v3/sdpi-components.js"></script>
+    <style>
+      :root {
+        --bg: #2d2d2d;
+        --bg-input: #3d3d3d;
+        --border: #565656;
+        --text: #d8d8d8;
+        --text-muted: #969696;
+        --accent: #0078d4;
+        --error: #ff6b6b;
+        --success: #4ade80;
+        --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 12px;
+        line-height: 1.4;
+        padding: 0;
+        min-height: 100vh;
+      }
+
+      .sdpi-item {
+        display: flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 4px 16px;
+        gap: 8px;
+      }
+
+      .sdpi-item-label {
+        flex: 0 0 80px;
+        text-align: right;
+        color: var(--text-muted);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .sdpi-item-value {
+        flex: 1;
+        min-width: 0;
+      }
+
+      input[type="text"],
+      input[type="password"],
+      input[type="number"],
+      select {
+        width: 100%;
+        background: var(--bg-input);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 4px 8px;
+        font-family: var(--font);
+        font-size: 12px;
+        outline: none;
+      }
+
+      input:focus,
+      select:focus {
+        border-color: var(--accent);
+      }
+
+      select {
+        cursor: pointer;
+        appearance: auto;
+      }
+
+      .worker-row {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+
+      .worker-row select {
+        flex: 1;
+      }
+
+      .load-btn {
+        flex: 0 0 auto;
+        background: var(--bg-input);
+        color: var(--text-muted);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 4px 8px;
+        cursor: pointer;
+        font-size: 12px;
+        font-family: var(--font);
+        white-space: nowrap;
+      }
+
+      .load-btn:hover {
+        background: #4d4d4d;
+        color: var(--text);
+      }
+
+      .load-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .status-msg {
+        font-size: 10px;
+        color: var(--text-muted);
+        padding: 0 16px 0 96px;
+        min-height: 14px;
+      }
+
+      details {
+        margin: 8px 16px;
+      }
+
+      summary {
+        cursor: pointer;
+        color: var(--text-muted);
+        font-size: 11px;
+      }
+
+      .help-content {
+        color: #808080;
+        font-size: 11px;
+        margin: 4px 0 8px;
+      }
+
+      .help-content ol {
+        padding-left: 16px;
+        margin: 4px 0;
+      }
+
+      .help-content p {
+        margin: 4px 0;
+      }
+
+      .separator {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 8px 16px;
+      }
+    </style>
   </head>
   <body>
-    <sdpi-item label="API Token">
-      <sdpi-textfield
-        setting="apiToken"
-        placeholder="Your Cloudflare API Token"
-        type="password"
-        required
-      ></sdpi-textfield>
-    </sdpi-item>
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">API Token</div>
+      <div class="sdpi-item-value">
+        <input
+          type="password"
+          id="apiToken"
+          placeholder="Your Cloudflare API Token"
+        />
+      </div>
+    </div>
 
-    <sdpi-item label="Account ID">
-      <sdpi-textfield
-        setting="accountId"
-        placeholder="32-character hex Account ID"
-        required
-      ></sdpi-textfield>
-    </sdpi-item>
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Account ID</div>
+      <div class="sdpi-item-value">
+        <input
+          type="text"
+          id="accountId"
+          placeholder="32-character hex Account ID"
+        />
+      </div>
+    </div>
 
-    <sdpi-item label="Worker Name">
-      <sdpi-textfield
-        setting="workerName"
-        placeholder="my-worker"
-        required
-      ></sdpi-textfield>
-    </sdpi-item>
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Worker</div>
+      <div class="sdpi-item-value">
+        <div class="worker-row">
+          <select id="workerName">
+            <option value="">-- Select Worker --</option>
+          </select>
+          <button type="button" id="loadWorkersBtn" class="load-btn" title="Load workers from Cloudflare">
+            Load
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="status-msg" id="workerStatus"></div>
 
-    <sdpi-item label="Refresh (seconds)">
-      <sdpi-textfield
-        setting="refreshIntervalSeconds"
-        placeholder="60"
-        type="number"
-        min="10"
-        max="3600"
-      ></sdpi-textfield>
-    </sdpi-item>
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Refresh (s)</div>
+      <div class="sdpi-item-value">
+        <input
+          type="number"
+          id="refreshIntervalSeconds"
+          placeholder="60"
+          min="10"
+          max="3600"
+        />
+      </div>
+    </div>
+
+    <hr class="separator" />
 
     <details>
-      <summary style="cursor: pointer; color: #969696; font-size: 11px; margin: 8px 16px;">
-        How to create an API Token
-      </summary>
-      <div style="color: #808080; font-size: 11px; margin: 4px 16px 8px;">
-        <ol style="padding-left: 16px; margin: 4px 0;">
+      <summary>How to create an API Token</summary>
+      <div class="help-content">
+        <ol>
           <li>Go to <em>Cloudflare Dashboard → My Profile → API Tokens</em></li>
           <li>Click <em>Create Token</em></li>
           <li>Use a <em>Custom Token</em> template</li>
-          <li>Under Permissions, select <em>Account → Workers Scripts → Read</em></li>
+          <li>
+            Under Permissions, select
+            <em>Account → Workers Scripts → Read</em>
+          </li>
           <li>Save and paste the token above</li>
         </ol>
-        <p style="margin: 4px 0;">
+        <p>
           Your Account ID is on the <em>Workers &amp; Pages</em> overview page
           in the right sidebar.
         </p>
       </div>
     </details>
+
+    <script>
+      /* ───────── Stream Deck WebSocket ───────── */
+      let websocket = null;
+      let piUUID = "";
+      let settings = {};
+
+      // Stream Deck calls this global function to bootstrap the PI
+      // eslint-disable-next-line no-unused-vars
+      function connectElgatoStreamDeckSocket(
+        port,
+        uuid,
+        registerEvent,
+        info,
+        actionInfo
+      ) {
+        piUUID = uuid;
+
+        // Parse initial settings from actionInfo
+        try {
+          const action = JSON.parse(actionInfo);
+          settings = action?.payload?.settings || {};
+        } catch {
+          settings = {};
+        }
+
+        websocket = new WebSocket("ws://127.0.0.1:" + port);
+
+        websocket.onopen = function () {
+          // Register the Property Inspector
+          websocket.send(
+            JSON.stringify({ event: registerEvent, uuid: uuid })
+          );
+          // Populate form with saved settings
+          populateForm();
+          // Auto-load workers if credentials are present
+          if (settings.apiToken && settings.accountId) {
+            loadWorkers();
+          }
+        };
+
+        websocket.onmessage = function (evt) {
+          try {
+            const data = JSON.parse(evt.data);
+            if (data.event === "didReceiveSettings") {
+              settings = data?.payload?.settings || {};
+              populateForm();
+            }
+          } catch {
+            // ignore parse errors
+          }
+        };
+      }
+
+      /* ───────── Settings ↔ Form ───────── */
+
+      const FIELDS = [
+        "apiToken",
+        "accountId",
+        "workerName",
+        "refreshIntervalSeconds",
+      ];
+
+      function populateForm() {
+        FIELDS.forEach(function (key) {
+          const el = document.getElementById(key);
+          if (el) el.value = settings[key] || "";
+        });
+
+        // Ensure the saved worker name is an option in the dropdown
+        const workerSelect = document.getElementById("workerName");
+        const saved = settings.workerName || "";
+        if (
+          saved &&
+          !workerSelect.querySelector(
+            'option[value="' + CSS.escape(saved) + '"]'
+          )
+        ) {
+          const opt = document.createElement("option");
+          opt.value = saved;
+          opt.textContent = saved;
+          workerSelect.appendChild(opt);
+          workerSelect.value = saved;
+        }
+      }
+
+      function saveSettings() {
+        FIELDS.forEach(function (key) {
+          const el = document.getElementById(key);
+          if (el) settings[key] = el.value;
+        });
+
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+          websocket.send(
+            JSON.stringify({
+              event: "setSettings",
+              context: piUUID,
+              payload: settings,
+            })
+          );
+        }
+      }
+
+      // Bind change/input events for all fields
+      FIELDS.forEach(function (key) {
+        var el = document.getElementById(key);
+        if (el) {
+          el.addEventListener("input", saveSettings);
+          el.addEventListener("change", saveSettings);
+        }
+      });
+
+      /* ───────── Worker List Fetch ───────── */
+
+      const loadBtn = document.getElementById("loadWorkersBtn");
+      const workerSelect = document.getElementById("workerName");
+      const statusDiv = document.getElementById("workerStatus");
+
+      loadBtn.addEventListener("click", function () {
+        loadWorkers();
+      });
+
+      async function loadWorkers() {
+        const apiToken = document.getElementById("apiToken").value.trim();
+        const accountId = document.getElementById("accountId").value.trim();
+
+        if (!apiToken || !accountId) {
+          showStatus("Enter API Token and Account ID first", "error");
+          return;
+        }
+
+        loadBtn.disabled = true;
+        showStatus("Loading workers…", "info");
+
+        try {
+          const resp = await fetch(
+            "https://api.cloudflare.com/client/v4/accounts/" +
+              encodeURIComponent(accountId) +
+              "/workers/scripts",
+            {
+              headers: {
+                Authorization: "Bearer " + apiToken,
+                "Content-Type": "application/json",
+              },
+            }
+          );
+
+          if (!resp.ok) {
+            var errText = "HTTP " + resp.status;
+            if (resp.status === 401 || resp.status === 403) {
+              errText = "Invalid token or insufficient permissions";
+            } else if (resp.status === 404) {
+              errText = "Account not found — check Account ID";
+            }
+            throw new Error(errText);
+          }
+
+          const data = await resp.json();
+
+          if (!data.success || !Array.isArray(data.result)) {
+            const msg =
+              (data.errors && data.errors[0] && data.errors[0].message) ||
+              "Unknown API error";
+            throw new Error(msg);
+          }
+
+          const currentValue = workerSelect.value;
+
+          // Clear dropdown
+          workerSelect.innerHTML = "";
+
+          // Placeholder option
+          const placeholder = document.createElement("option");
+          placeholder.value = "";
+          placeholder.textContent = "-- Select Worker --";
+          workerSelect.appendChild(placeholder);
+
+          // Sort workers alphabetically and populate
+          const workers = data.result
+            .map(function (w) {
+              return w.id;
+            })
+            .sort();
+
+          workers.forEach(function (name) {
+            const opt = document.createElement("option");
+            opt.value = name;
+            opt.textContent = name;
+            workerSelect.appendChild(opt);
+          });
+
+          // Restore previous selection if it exists
+          if (currentValue) {
+            workerSelect.value = currentValue;
+          }
+
+          var count = workers.length;
+          showStatus(
+            count + " worker" + (count !== 1 ? "s" : "") + " found",
+            "success"
+          );
+        } catch (err) {
+          showStatus(err.message || "Failed to load workers", "error");
+        } finally {
+          loadBtn.disabled = false;
+        }
+      }
+
+      function showStatus(msg, type) {
+        statusDiv.textContent = msg;
+        if (type === "error") {
+          statusDiv.style.color = "#ff6b6b";
+        } else if (type === "success") {
+          statusDiv.style.color = "#4ade80";
+        } else {
+          statusDiv.style.color = "#969696";
+        }
+      }
+    </script>
   </body>
 </html>
