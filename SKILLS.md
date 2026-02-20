@@ -99,19 +99,19 @@ This design was tested on hardware and confirmed to be highly readable:
 
 ### Disable default title overlay
 
-When your plugin draws everything via `setImage`, set `ShowTitle: false` and
-`UserTitleEnabled: false` in the manifest state so users don't accidentally
-overlay text.
+When your plugin draws everything via `setImage`, set `ShowTitle: false` in the
+manifest state and `UserTitleEnabled: false` at the **Action level** (sibling of
+`States`, not inside it) so users don't accidentally overlay text.
 
 ```json
 {
   "States": [
     {
       "Image": "imgs/actions/my-action",
-      "ShowTitle": false,
-      "UserTitleEnabled": false
+      "ShowTitle": false
     }
-  ]
+  ],
+  "UserTitleEnabled": false
 }
 ```
 
@@ -371,7 +371,110 @@ wrangler
 
 ---
 
-## 11. Updating This Document
+## 11. Marquee (Scrolling Text) for Long Names
+
+When identifiers (gateway names, worker names) exceed the `maxVisible` character
+limit (10 chars), a circular marquee scroll animates the name on the key.
+
+### Implementation: `src/services/marquee-controller.ts`
+
+- **Circular scroll**: text loops continuously with a separator gap (`"  •  "`)
+  between repetitions, like a news ticker.
+- **Pause at start**: `MARQUEE_PAUSE_TICKS = 3` ticks pause before each scroll cycle.
+- **500ms tick interval**: set in the action, not the controller.
+- **Framework-agnostic**: controller manages state only; action owns the timer.
+
+### Key design decisions
+
+| Decision | Rationale |
+|---|---|
+| Circular (not bounce-back) | Feels like a natural ticker; no jarring reverse |
+| `"  •  "` separator (5 chars) | Matches the iCal plugin marquee; visually clear gap |
+| 10-char visible window | Tested on 72×72 OLED — 10 chars at 18px font is the max that fits |
+| Marquee continues across metric cycling | Position preserved when user presses key |
+| Marquee resets on gateway change | Fresh start for new text |
+
+### How to use in a new action
+
+```typescript
+import { MarqueeController } from "../services/marquee-controller";
+
+private marquee = new MarqueeController(10);
+private marqueeInterval: ReturnType<typeof setInterval> | null = null;
+
+// After fetching data:
+this.marquee.setText(gatewayName);
+if (this.marquee.needsAnimation()) {
+  this.marqueeInterval = setInterval(() => {
+    if (this.marquee.tick()) {
+      // re-render with this.marquee.getCurrentText()
+    }
+  }, 500);
+}
+```
+
+---
+
+## 12. Rate Limiting and Error Back-off
+
+### HTTP 429 handling (`RateLimitError`)
+
+- `cloudflare-ai-gateway-api.ts` detects 429 responses and throws `RateLimitError`.
+- The error includes `retryAfterSeconds` parsed from the `Retry-After` header.
+- Actions use a 90-second default back-off, or the server hint if longer.
+- Cached data is preserved during transient errors — the key keeps showing
+  the last good value instead of flashing "ERR".
+
+### Polling intervals
+
+| State | Interval |
+|---|---|
+| Normal | User-configured (default 60s) |
+| After error | 90s (rate limit back-off) |
+| After 429 with `Retry-After` | Server-hinted duration |
+
+---
+
+## 13. Global Settings (Shared Credentials)
+
+API credentials are stored in Stream Deck's global settings rather than
+per-action settings. This avoids duplicate token entry and enables a single
+setup window shared by all actions.
+
+### Architecture
+
+1. **`global-settings-store.ts`**: In-memory store with pub/sub (`onGlobalSettingsChanged`).
+2. **`plugin.ts`**: Loads on startup, listens for updates via `onDidReceiveGlobalSettings`.
+3. **`setup.html`**: Shared UI window opened from any action's Property Inspector.
+4. **Actions**: Subscribe to changes and re-initialize API clients automatically.
+
+### Key rule
+Never store `apiToken` or `accountId` in per-action settings. Always read from
+`getGlobalSettings()`.
+
+---
+
+## 14. UserTitleEnabled Placement (CRITICAL)
+
+`"UserTitleEnabled": false` must be placed at the **Action level** (sibling of
+`States`), NOT inside individual `States` entries. Placing it inside `States`
+has no effect — the SDK ignores it there.
+
+```json
+{
+  "Name": "My Action",
+  "States": [{ "Image": "imgs/actions/my-action", "ShowTitle": false }],
+  "UserTitleEnabled": false,
+  "UUID": "com.pedrofuentes.cloudflare-utilities.my-action"
+}
+```
+
+This was discovered through hardware testing. The SDK documentation is ambiguous
+on placement.
+
+---
+
+## 15. Updating This Document
 
 When you discover new patterns, SDK capabilities, or UX insights:
 

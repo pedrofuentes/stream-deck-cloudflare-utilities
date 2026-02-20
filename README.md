@@ -13,25 +13,51 @@ Built with the [Stream Deck SDK](https://docs.elgato.com/streamdeck/sdk/introduc
   - 🔵 **Recent** — Deployed within the last 10 minutes
   - 🔴 **Error** — Failed to fetch status
   - ⚫ **Unconfigured** — Missing API token, account ID, or worker name
+- **AI Gateway Metric** — Displays real-time metrics from a Cloudflare AI Gateway. Press the key to cycle through metrics:
+  - 🔵 **Requests** — Total request count
+  - 🔵 **Tokens** — Total token usage
+  - 🟢 **Cost** — Estimated cost
+  - 🔴 **Errors** — Error count
+  - 🔵 **Logs Stored** — Number of stored logs
+  - Features: adaptive polling, error back-off with 429 rate-limit handling, marquee scrolling for long gateway names, metric cycling via key press
 
 > More actions are planned — see the [Roadmap](#roadmap) section below.
 
-### Setting Up Worker Deployment Status
+### Initial Setup (API Credentials)
 
-1. Drag the **Worker Deployment Status** action onto a Stream Deck key.
-2. In the Property Inspector, enter:
-   - **API Token** — A Cloudflare API Token with **Workers Scripts Read** permission.
-   - **Account ID** — Your 32-character Cloudflare Account ID (found on the Workers & Pages overview page).
-   - **Worker Name** — The name of the Worker script to monitor.
-   - **Refresh Interval** — How often to poll (default: 60 seconds, min: 10).
-3. Press the key at any time to force an immediate refresh.
+API credentials are shared across all actions that need Cloudflare API access (Worker Deployment Status, AI Gateway Metric).
+
+1. Add any Cloudflare action to your Stream Deck.
+2. In the Property Inspector, click **Setup** to open the credentials window.
+3. Enter your **API Token** and **Account ID**.
+4. Click **Save** — all actions using Cloudflare API will automatically pick up the credentials.
 
 #### Creating an API Token
 
 1. Go to **Cloudflare Dashboard → My Profile → API Tokens**.
 2. Click **Create Token** → use a **Custom Token** template.
-3. Under Permissions, select **Account → Workers Scripts → Read**.
-4. Save and paste the token into the action settings.
+3. Under Permissions, add:
+   - **Account → Workers Scripts → Read** (for Worker Deployment Status)
+   - **Account → AI Gateway → Read** (for AI Gateway Metric)
+4. Save and paste the token into the setup window.
+
+### Setting Up Worker Deployment Status
+
+1. Drag the **Worker Deployment Status** action onto a Stream Deck key.
+2. In the Property Inspector, select:
+   - **Worker Name** — Choose from the dropdown (populated from your account).
+   - **Refresh Interval** — How often to poll (default: 60 seconds, min: 10).
+3. Press the key at any time to force an immediate refresh.
+
+### Setting Up AI Gateway Metric
+
+1. Drag the **AI Gateway Metric** action onto a Stream Deck key.
+2. In the Property Inspector, select:
+   - **Gateway** — Choose from the dropdown (populated from your account).
+   - **Metric** — Which metric to display initially (default: Requests).
+   - **Time Range** — Data window: 24h, 7d, or 30d (default: 24h).
+   - **Refresh Interval** — How often to poll (default: 60 seconds, min: 10).
+3. Press the key to cycle through metrics: Requests → Tokens → Cost → Errors → Logs → (repeat).
 
 ## Requirements
 
@@ -134,17 +160,25 @@ The output is a `.streamDeckPlugin` file ready for distribution.
 │   │   ├── actions/             # Action-specific icons
 │   │   └── plugin/              # Plugin-level icons
 │   ├── ui/                      # Property inspector HTML files
+│   │   ├── setup.html           # Shared credentials setup window
+│   │   └── *.html               # Per-action property inspectors
 │   ├── manifest.json            # Plugin manifest
 │   └── .sdignore                # Files to exclude from packaging
 ├── src/                         # TypeScript source
 │   ├── actions/                 # Stream Deck action implementations
+│   │   ├── ai-gateway-metric.ts
 │   │   ├── cloudflare-status.ts
 │   │   └── worker-deployment-status.ts
 │   ├── services/                # API clients & business logic
+│   │   ├── cloudflare-ai-gateway-api.ts
 │   │   ├── cloudflare-api-client.ts
-│   │   └── cloudflare-workers-api.ts
+│   │   ├── cloudflare-workers-api.ts
+│   │   ├── global-settings-store.ts
+│   │   ├── key-image-renderer.ts
+│   │   └── marquee-controller.ts
 │   ├── types/                   # TypeScript type definitions
 │   │   ├── cloudflare.ts
+│   │   ├── cloudflare-ai-gateway.ts
 │   │   ├── cloudflare-workers.ts
 │   │   └── index.ts
 │   └── plugin.ts                # Plugin entry point
@@ -175,6 +209,7 @@ Roadmap items will be discussed and tracked in [GitHub Issues](https://github.co
 - Firewall event monitoring
 - Cache purge controls
 - SSL certificate expiry alerts
+- AI Gateway logs viewer
 
 ## Contributing
 

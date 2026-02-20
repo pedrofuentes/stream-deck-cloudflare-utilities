@@ -151,9 +151,47 @@ docs(readme): add zone analytics documentation
 
 ## Environment
 
-- No `.env` files are committed. API keys should be stored in Stream Deck action settings.
+- No `.env` files are committed. API keys are stored in **Stream Deck global settings** (shared across all actions) via the setup window.
 - The Cloudflare Status API (`https://www.cloudflarestatus.com/api/v2`) is public and requires no authentication.
-- Future Cloudflare API endpoints will require user-provided API tokens stored in action settings.
+- The Cloudflare Workers API and AI Gateway GraphQL API require user-provided API tokens stored in global settings.
+- Rate limiting (HTTP 429) is handled with graceful backoff — see `RateLimitError` in `cloudflare-ai-gateway-api.ts`.
+
+## Global Settings Architecture
+
+API credentials (API Token, Account ID) are shared across all actions via Stream Deck's global settings system.
+
+### How it works
+
+1. **`src/services/global-settings-store.ts`** — In-memory store with pub/sub. Actions subscribe to changes.
+2. **`src/plugin.ts`** — Loads global settings on startup and listens for updates via `onDidReceiveGlobalSettings`.
+3. **`com.pedrofuentes.cloudflare-utilities.sdPlugin/ui/setup.html`** — Shared setup window opened from any action's PI. Reads/writes global settings via `$SD.getGlobalSettings()` / `$SD.setGlobalSettings()`.
+4. **Each action** subscribes via `onGlobalSettingsChanged()` and re-initializes when credentials change.
+
+### Adding global settings fields
+
+1. Update the `GlobalSettings` type in `global-settings-store.ts`.
+2. Update `setup.html` with new input fields.
+3. Actions automatically pick up changes via the pub/sub system.
+
+## Marquee (Scrolling Text) System
+
+Long names (> 10 characters) are animated with a circular marquee scroll on the key display.
+
+### Key files
+- **`src/services/marquee-controller.ts`** — Reusable, framework-agnostic marquee state machine.
+- **Integration** in `src/actions/ai-gateway-metric.ts` — 500ms tick interval, `MARQUEE_PAUSE_TICKS = 3` pause at start of each loop.
+- **Separator**: `"  •  "` (2 spaces + bullet + 2 spaces) between text repetitions.
+
+### How to use `MarqueeController`
+```typescript
+const marquee = new MarqueeController(10); // maxVisible chars
+marquee.setText("some-long-gateway-name");
+
+if (marquee.needsAnimation()) {
+  // Start a setInterval that calls marquee.tick() every 500ms
+  // On tick() returning true, re-render with marquee.getCurrentText()
+}
+```
 
 ## UI / Key Display Design Rules
 
@@ -181,8 +219,8 @@ readability on the tiny OLED keys. Do not deviate without testing on a physical 
 - These sizes were tested on hardware. Do not make them smaller.
 
 ### 5. Manifest states
-- Every action must set `"ShowTitle": false` and `"UserTitleEnabled": false` in its
-  manifest `States` entry. This prevents the SDK title from overlaying our SVG.
+- Every action must set `"ShowTitle": false` in its `States` entry.
+- Every action must set `"UserTitleEnabled": false` at the **Action level** (sibling of `States`, not inside it). This prevents the SDK title from overlaying our SVG.
 
 ### 6. Action list icons
 - Must be **monochromatic white** on **transparent background**.
