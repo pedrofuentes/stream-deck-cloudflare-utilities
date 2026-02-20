@@ -154,3 +154,54 @@ docs(readme): add zone analytics documentation
 - No `.env` files are committed. API keys should be stored in Stream Deck action settings.
 - The Cloudflare Status API (`https://www.cloudflarestatus.com/api/v2`) is public and requires no authentication.
 - Future Cloudflare API endpoints will require user-provided API tokens stored in action settings.
+
+## UI / Key Display Design Rules
+
+**These rules are mandatory.** They were validated on hardware and produce the best
+readability on the tiny OLED keys. Do not deviate without testing on a physical device.
+
+### 1. Always use `setImage`, never `setTitle` alone
+- Render all key content as dynamic SVGs via `setImage()`.
+- Use the shared renderer: `src/services/key-image-renderer.ts`.
+- `setTitle` produces tiny, unstyled text. Emoji rendering is inconsistent. Do not use it.
+
+### 2. Use the accent bar pattern
+- A **6px colored bar** across the top of the key is the status indicator.
+- Do NOT use small dots, icons, or emoji for status — they're invisible on 72×72 OLED.
+- The accent bar color maps to `STATUS_COLORS` in the renderer.
+
+### 3. Center all text
+- All text must be `text-anchor="middle"` at `x="72"` (center of 144px canvas).
+- Left-aligned text wastes space and looks unbalanced on small keys.
+
+### 4. Font sizing (at 144×144 canvas)
+- **Line 2 (main status)**: 30px, bold, white `#ffffff`
+- **Line 1 (identifier)**: 18px, normal, gray `#9ca3af`
+- **Line 3 (metadata)**: 15px, normal, gray `#9ca3af`
+- These sizes were tested on hardware. Do not make them smaller.
+
+### 5. Manifest states
+- Every action must set `"ShowTitle": false` and `"UserTitleEnabled": false` in its
+  manifest `States` entry. This prevents the SDK title from overlaying our SVG.
+
+### 6. Action list icons
+- Must be **monochromatic white** on **transparent background**.
+- SVG format, 20×20 viewBox.
+- No colored fills, no solid backgrounds.
+
+### 7. Reuse the renderer
+- Do NOT generate SVG strings directly in action files.
+- Import from `key-image-renderer.ts`. Add new render functions there if needed.
+- Keep the accent bar + centered text pattern consistent across all actions.
+
+### 8. Refer to SKILLS.md
+- `SKILLS.md` contains detailed research, color palette, PI guidelines, device
+  sizes, and layout templates. Read it before making UI changes.
+
+## How to Modify Key Visuals
+
+1. **Edit** `src/services/key-image-renderer.ts` (shared renderer).
+2. **Update tests** in `tests/services/key-image-renderer.test.ts`.
+3. **Build**, **restart plugin** (`streamdeck restart com.pedrofuentes.cloudflare-utilities`).
+4. **Verify on physical device** — monitor screenshots are not sufficient.
+5. **Update SKILLS.md** if new patterns are discovered.
