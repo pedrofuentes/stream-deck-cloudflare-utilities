@@ -31,6 +31,8 @@ export type AiGatewayMetricType =
   | "tokens"
   | "cost"
   | "errors"
+  | "error_rate"
+  | "cache_hit_rate"
   | "logs_stored";
 
 /**
@@ -127,6 +129,8 @@ export interface AiGatewayMetrics {
   tokensIn: number;
   /** Tokens out */
   tokensOut: number;
+  /** Cached tokens (in + out) */
+  cachedTokens: number;
   /** Estimated cost in USD */
   cost: number;
   /** Error count */
@@ -143,6 +147,8 @@ export const METRIC_CYCLE_ORDER: AiGatewayMetricType[] = [
   "tokens",
   "cost",
   "errors",
+  "error_rate",
+  "cache_hit_rate",
   "logs_stored",
 ];
 
@@ -154,6 +160,8 @@ export const METRIC_LABELS: Record<AiGatewayMetricType, string> = {
   tokens: "Tokens",
   cost: "Cost",
   errors: "Errors",
+  error_rate: "Error Rate",
+  cache_hit_rate: "Cache Rate",
   logs_stored: "Logs",
 };
 
@@ -165,5 +173,7 @@ export const METRIC_SHORT_LABELS: Record<AiGatewayMetricType, string> = {
   tokens: "tokens",
   cost: "cost",
   errors: "errors",
+  error_rate: "err rate",
+  cache_hit_rate: "cache",
   logs_stored: "stored",
 };

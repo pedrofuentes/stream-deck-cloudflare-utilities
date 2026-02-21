@@ -86,6 +86,7 @@ function makeMetrics(overrides?: Partial<AiGatewayMetrics>): AiGatewayMetrics {
     tokens: 80_000,
     tokensIn: 50_000,
     tokensOut: 30_000,
+    cachedTokens: 20_000,
     cost: 4.52,
     errors: 3,
     logsStored: 42_000,
@@ -143,6 +144,14 @@ describe("metricColor", () => {
     expect(metricColor("errors")).toBe(STATUS_COLORS.red);
   });
 
+  it("should return red for error_rate", () => {
+    expect(metricColor("error_rate")).toBe(STATUS_COLORS.red);
+  });
+
+  it("should return green for cache_hit_rate", () => {
+    expect(metricColor("cache_hit_rate")).toBe(STATUS_COLORS.green);
+  });
+
   it("should return blue for logs_stored", () => {
     expect(metricColor("logs_stored")).toBe(STATUS_COLORS.blue);
   });
@@ -173,6 +182,30 @@ describe("formatMetricValue", () => {
     expect(formatMetricValue("errors", metrics)).toBe("3");
   });
 
+  it("should format error_rate as percentage", () => {
+    expect(formatMetricValue("error_rate", metrics)).toBe("0.2%");
+  });
+
+  it("should format error_rate as 0% when no requests", () => {
+    const zeroReqs = makeMetrics({ requests: 0, errors: 0 });
+    expect(formatMetricValue("error_rate", zeroReqs)).toBe("0%");
+  });
+
+  it("should format cache_hit_rate as percentage", () => {
+    // cachedTokens=20000, tokens=80000 → 25%
+    expect(formatMetricValue("cache_hit_rate", metrics)).toBe("25%");
+  });
+
+  it("should format cache_hit_rate as 0% when no tokens", () => {
+    const zeroTokens = makeMetrics({ tokens: 0, cachedTokens: 0 });
+    expect(formatMetricValue("cache_hit_rate", zeroTokens)).toBe("0%");
+  });
+
+  it("should format cache_hit_rate with decimal when not round", () => {
+    const m = makeMetrics({ tokens: 1000, cachedTokens: 333 });
+    expect(formatMetricValue("cache_hit_rate", m)).toBe("33.3%");
+  });
+
   it("should format logs_stored", () => {
     expect(formatMetricValue("logs_stored", metrics)).toBe("42K");
   });
@@ -185,6 +218,7 @@ describe("formatMetricValue", () => {
     const zeroMetrics = makeMetrics({
       requests: 0,
       tokens: 0,
+      cachedTokens: 0,
       cost: 0,
       errors: 0,
       logsStored: 0,
@@ -193,6 +227,8 @@ describe("formatMetricValue", () => {
     expect(formatMetricValue("tokens", zeroMetrics)).toBe("0");
     expect(formatMetricValue("cost", zeroMetrics)).toBe("$0");
     expect(formatMetricValue("errors", zeroMetrics)).toBe("0");
+    expect(formatMetricValue("error_rate", zeroMetrics)).toBe("0%");
+    expect(formatMetricValue("cache_hit_rate", zeroMetrics)).toBe("0%");
     expect(formatMetricValue("logs_stored", zeroMetrics)).toBe("0");
   });
 });
@@ -292,6 +328,24 @@ describe("AiGatewayMetric", () => {
       expect(svg).toContain("3");
       expect(svg).toContain("errors 24h");
       expect(svg).toContain(STATUS_COLORS.red);
+    });
+
+    it("should render error_rate metric with red accent", () => {
+      const image = action.renderMetric("error_rate", "my-gw", metrics, "24h");
+      const svg = decodeSvg(image);
+
+      expect(svg).toContain("0.2%");
+      expect(svg).toContain("err rate 24h");
+      expect(svg).toContain(STATUS_COLORS.red);
+    });
+
+    it("should render cache_hit_rate metric with green accent", () => {
+      const image = action.renderMetric("cache_hit_rate", "my-gw", metrics, "7d");
+      const svg = decodeSvg(image);
+
+      expect(svg).toContain("25%");
+      expect(svg).toContain("cache 7d");
+      expect(svg).toContain(STATUS_COLORS.green);
     });
 
     it("should render logs_stored without time range suffix", () => {
@@ -618,12 +672,38 @@ describe("AiGatewayMetric", () => {
       );
     });
 
-    it("should cycle from errors to logs_stored", async () => {
+    it("should cycle from errors to error_rate", async () => {
       mockGetMetrics.mockResolvedValue(makeMetrics());
       const ev = makeMockEvent({ ...VALID_SETTINGS, metric: "errors" });
       await action.onWillAppear(ev);
 
       const keyEv = makeMockEvent({ ...VALID_SETTINGS, metric: "errors" });
+      await action.onKeyDown(keyEv);
+
+      expect(keyEv.action.setSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ metric: "error_rate" })
+      );
+    });
+
+    it("should cycle from error_rate to cache_hit_rate", async () => {
+      mockGetMetrics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent({ ...VALID_SETTINGS, metric: "error_rate" });
+      await action.onWillAppear(ev);
+
+      const keyEv = makeMockEvent({ ...VALID_SETTINGS, metric: "error_rate" });
+      await action.onKeyDown(keyEv);
+
+      expect(keyEv.action.setSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ metric: "cache_hit_rate" })
+      );
+    });
+
+    it("should cycle from cache_hit_rate to logs_stored", async () => {
+      mockGetMetrics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent({ ...VALID_SETTINGS, metric: "cache_hit_rate" });
+      await action.onWillAppear(ev);
+
+      const keyEv = makeMockEvent({ ...VALID_SETTINGS, metric: "cache_hit_rate" });
       await action.onKeyDown(keyEv);
 
       expect(keyEv.action.setSettings).toHaveBeenCalledWith(

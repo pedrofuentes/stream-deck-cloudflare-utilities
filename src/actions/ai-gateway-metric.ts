@@ -55,6 +55,10 @@ export function metricColor(metric: AiGatewayMetricType): string {
       return STATUS_COLORS.green;
     case "errors":
       return STATUS_COLORS.red;
+    case "error_rate":
+      return STATUS_COLORS.red;
+    case "cache_hit_rate":
+      return STATUS_COLORS.green;
     case "logs_stored":
       return STATUS_COLORS.blue;
     default:
@@ -75,6 +79,12 @@ export function formatMetricValue(metric: AiGatewayMetricType, metrics: AiGatewa
       return formatCost(metrics.cost);
     case "errors":
       return formatCompactNumber(metrics.errors);
+    case "error_rate":
+      if (metrics.requests === 0) return "0%";
+      return `${((metrics.errors / metrics.requests) * 100).toFixed(1).replace(/\.0$/, "")}%`;
+    case "cache_hit_rate":
+      if (metrics.tokens === 0) return "0%";
+      return `${((metrics.cachedTokens / metrics.tokens) * 100).toFixed(1).replace(/\.0$/, "")}%`;
     case "logs_stored":
       return formatCompactNumber(metrics.logsStored);
     default:

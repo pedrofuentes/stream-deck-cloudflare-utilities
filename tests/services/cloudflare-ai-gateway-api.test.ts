@@ -90,7 +90,7 @@ function makeLogsResponse(
 }
 
 function makeGraphQLResponse(
-  metrics: { requests: number; tokensIn: number; tokensOut: number; cost: number; errors: number },
+  metrics: { requests: number; tokensIn: number; tokensOut: number; cost: number; errors: number; cachedTokensIn?: number; cachedTokensOut?: number },
   hasErrors = false
 ): AiGatewayGraphQLResponse {
   const base: AiGatewayGraphQLResponse = {
@@ -104,8 +104,8 @@ function makeGraphQLResponse(
                 sum: {
                   cost: metrics.cost,
                   erroredRequests: metrics.errors,
-                  cachedTokensIn: 0,
-                  cachedTokensOut: 0,
+                  cachedTokensIn: metrics.cachedTokensIn ?? 0,
+                  cachedTokensOut: metrics.cachedTokensOut ?? 0,
                   uncachedTokensIn: metrics.tokensIn,
                   uncachedTokensOut: metrics.tokensOut,
                 },
@@ -378,16 +378,19 @@ describe("CloudflareAiGatewayApi", () => {
           tokensOut: 30_000,
           cost: 4.52,
           errors: 3,
+          cachedTokensIn: 5_000,
+          cachedTokensOut: 3_000,
         })
       );
 
       const result = await client.getAnalytics("gw-1", "24h");
 
       expect(result.requests).toBe(1500);
-      expect(result.tokensIn).toBe(50_000);
-      expect(result.tokensOut).toBe(30_000);
+      expect(result.tokensIn).toBe(55_000); // 5000 cached + 50000 uncached
+      expect(result.tokensOut).toBe(33_000); // 3000 cached + 30000 uncached
       expect(result.cost).toBe(4.52);
       expect(result.errors).toBe(3);
+      expect(result.cachedTokens).toBe(8_000); // 5000 + 3000
     });
 
     it("should return zeros when no data returned", async () => {
@@ -410,6 +413,7 @@ describe("CloudflareAiGatewayApi", () => {
       expect(result.tokensOut).toBe(0);
       expect(result.cost).toBe(0);
       expect(result.errors).toBe(0);
+      expect(result.cachedTokens).toBe(0);
     });
 
     it("should return zeros when accounts array is empty", async () => {
@@ -428,6 +432,7 @@ describe("CloudflareAiGatewayApi", () => {
       expect(result.tokensOut).toBe(0);
       expect(result.cost).toBe(0);
       expect(result.errors).toBe(0);
+      expect(result.cachedTokens).toBe(0);
     });
 
     it("should handle null values in sum with fallback to 0", async () => {
@@ -462,6 +467,7 @@ describe("CloudflareAiGatewayApi", () => {
       expect(result.tokensOut).toBe(0);
       expect(result.cost).toBe(0);
       expect(result.errors).toBe(0);
+      expect(result.cachedTokens).toBe(0);
     });
 
     it("should send POST request with correct body", async () => {
@@ -592,6 +598,7 @@ describe("CloudflareAiGatewayApi", () => {
       expect(metrics.tokensOut).toBe(15_000);
       expect(metrics.cost).toBe(2.5);
       expect(metrics.errors).toBe(5);
+      expect(metrics.cachedTokens).toBe(0);
       expect(metrics.logsStored).toBe(8_000);
     });
 

@@ -137,6 +137,7 @@ export class CloudflareAiGatewayApi {
     requests: number;
     tokensIn: number;
     tokensOut: number;
+    cachedTokens: number;
     cost: number;
     errors: number;
   }> {
@@ -201,7 +202,7 @@ export class CloudflareAiGatewayApi {
     const groups = data.data?.viewer?.accounts?.[0]?.aiGatewayRequestsAdaptiveGroups;
 
     if (!groups || groups.length === 0) {
-      return { requests: 0, tokensIn: 0, tokensOut: 0, cost: 0, errors: 0 };
+      return { requests: 0, tokensIn: 0, tokensOut: 0, cachedTokens: 0, cost: 0, errors: 0 };
     }
 
     const group = groups[0];
@@ -210,6 +211,7 @@ export class CloudflareAiGatewayApi {
       requests: group.count ?? 0,
       tokensIn: (sum.cachedTokensIn ?? 0) + (sum.uncachedTokensIn ?? 0),
       tokensOut: (sum.cachedTokensOut ?? 0) + (sum.uncachedTokensOut ?? 0),
+      cachedTokens: (sum.cachedTokensIn ?? 0) + (sum.cachedTokensOut ?? 0),
       cost: sum.cost ?? 0,
       errors: sum.erroredRequests ?? 0,
     };
@@ -234,6 +236,7 @@ export class CloudflareAiGatewayApi {
       tokens: analytics.tokensIn + analytics.tokensOut,
       tokensIn: analytics.tokensIn,
       tokensOut: analytics.tokensOut,
+      cachedTokens: analytics.cachedTokens,
       cost: analytics.cost,
       errors: analytics.errors,
       logsStored,
