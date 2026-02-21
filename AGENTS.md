@@ -149,6 +149,62 @@ test(services): add timeout edge case tests
 docs(readme): add zone analytics documentation
 ```
 
+## Branching Model
+
+This project uses a **GitHub Flow** branching model. All work happens on feature branches; `main` is always deployable.
+
+### Rules
+
+1. **`main` is protected.** Never commit directly to `main`. All changes go through feature branches.
+2. **One branch per feature or fix.** Create a branch, do the work, merge back to `main`.
+3. **Tests must pass** on the branch before merging.
+4. **Delete the branch** after merging.
+
+### Branch Naming
+
+Use the conventional commit type as prefix, followed by a short kebab-case description:
+
+```
+feat/<short-description>     # New features or actions
+fix/<short-description>      # Bug fixes
+refactor/<short-description> # Code restructuring
+docs/<short-description>     # Documentation changes
+chore/<short-description>    # Build, config, dependency updates
+test/<short-description>     # Test-only changes
+```
+
+**Examples:**
+```
+feat/worker-analytics-action
+feat/component-drilldown
+fix/rate-limit-backoff
+refactor/extract-polling-mixin
+docs/update-roadmap
+chore/upgrade-sdk-v2.1
+```
+
+### Workflow
+
+```
+main ─────────────────────────────────────────── main
+       \                                      /
+        feat/worker-analytics ───────────────
+```
+
+1. **Create branch**: `git checkout -b feat/worker-analytics`
+2. **Develop**: Make commits on the branch (conventional commits).
+3. **Test**: `npm test` — all tests must pass.
+4. **Merge**: `git checkout main && git merge feat/worker-analytics`
+5. **Tag release** (if applicable): `git tag v1.1.0 && git push --tags`
+6. **Delete branch**: `git branch -d feat/worker-analytics`
+7. **Push**: `git push origin main`
+
+### Release Versions
+
+- Each planned version in `ROADMAP.md` gets its features built on separate branches.
+- After all branches for a version are merged, bump the version, run `npm run pack`, and create a GitHub release.
+- Version tags (`v1.1.0`, `v1.2.0`) are created on `main` after merging.
+
 ## Environment
 
 - No `.env` files are committed. API keys are stored in **Stream Deck global settings** (shared across all actions) via the setup window.
@@ -243,3 +299,45 @@ readability on the tiny OLED keys. Do not deviate without testing on a physical 
 3. **Build**, **restart plugin** (`streamdeck restart com.pedrofuentes.cloudflare-utilities`).
 4. **Verify on physical device** — monitor screenshots are not sufficient.
 5. **Update SKILLS.md** if new patterns are discovered.
+
+## Contributing Learnings Back to the Template
+
+This plugin was created from the **stream-deck-template**: https://github.com/pedrofuentes/stream-deck-template
+
+The template is a shared knowledge hub for all Stream Deck plugins. As an agent, you should **proactively contribute new learnings** back to it after completing significant work.
+
+### Before Starting Major Work
+
+Read `S:\Pedro\Projects\stream-deck-template\LEARNINGS.md` for the latest consolidated knowledge from all plugins (iCal, GitHub Utilities, Cloudflare Utilities, and any future plugins). This avoids re-discovering known pitfalls and ensures you benefit from solutions found in other projects.
+
+### When to Offer a Contribution
+
+- After solving a **non-obvious bug** or hardware quirk
+- After implementing a **reusable pattern** (polling, caching, UI, testing)
+- After discovering a **manifest or SDK constraint**
+- After a **release** (summarize what was learned)
+- When the session is **wrapping up** or the user asks "anything else?"
+
+### How to Contribute
+
+1. **Write** findings to `S:\Pedro\Projects\stream-deck-template\contributions\cloudflare-utilities.md` using the format defined in `COLLABORATION.md`.
+2. **Commit and push** (or open a PR) to https://github.com/pedrofuentes/stream-deck-template with a conventional commit:
+   ```
+   docs(cloudflare-utilities): add learnings about <topic>
+   ```
+3. Only add **NEW** learnings — read `LEARNINGS.md` first to avoid duplicating existing knowledge.
+
+### Contribution Format
+
+```markdown
+## [Category] — Short Title
+
+**Discovered in**: cloudflare-utilities
+**Date**: <date>
+**Severity**: critical | important | nice-to-know
+
+**Problem**: What went wrong or what was unclear
+**Solution**: What fixed it
+**Code example** (if applicable)
+**Prevention**: How to avoid this in the future
+```
