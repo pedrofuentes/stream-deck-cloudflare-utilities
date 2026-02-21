@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="20" height="20">
+  <!-- Worker Analytics icon: bar chart with gear -->
+  <rect x="2" y="12" width="3" height="6" rx="0.5" fill="none" stroke="white" stroke-width="1.2"/>
+  <rect x="7" y="8" width="3" height="10" rx="0.5" fill="none" stroke="white" stroke-width="1.2"/>
+  <rect x="12" y="4" width="3" height="14" rx="0.5" fill="none" stroke="white" stroke-width="1.2"/>
+  <circle cx="16.5" cy="4" r="2" fill="none" stroke="white" stroke-width="1"/>
+  <line x1="16.5" y1="1.5" x2="16.5" y2="2" stroke="white" stroke-width="0.8"/>
+  <line x1="16.5" y1="6" x2="16.5" y2="6.5" stroke="white" stroke-width="0.8"/>
+  <line x1="14" y1="4" x2="14.5" y2="4" stroke="white" stroke-width="0.8"/>
+  <line x1="18.5" y1="4" x2="19" y2="4" stroke="white" stroke-width="0.8"/>
+</svg>

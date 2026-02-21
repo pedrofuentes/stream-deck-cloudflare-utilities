@@ -9,6 +9,7 @@ import streamDeck from "@elgato/streamdeck";
 
 import { AiGatewayMetric } from "./actions/ai-gateway-metric";
 import { CloudflareStatus } from "./actions/cloudflare-status";
+import { WorkerAnalytics } from "./actions/worker-analytics";
 import { WorkerDeploymentStatus } from "./actions/worker-deployment-status";
 import { updateGlobalSettings, type GlobalSettings } from "./services/global-settings-store";
 
@@ -18,6 +19,7 @@ streamDeck.logger.setLevel("debug");
 // Register actions
 streamDeck.actions.registerAction(new AiGatewayMetric());
 streamDeck.actions.registerAction(new CloudflareStatus());
+streamDeck.actions.registerAction(new WorkerAnalytics());
 streamDeck.actions.registerAction(new WorkerDeploymentStatus());
 
 // ── Global Settings ────────────────────────────────────────────────────────

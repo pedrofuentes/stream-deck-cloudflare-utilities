@@ -42,6 +42,20 @@
       "Tooltip": "Display metrics from a Cloudflare AI Gateway",
       "UserTitleEnabled": false,
       "UUID": "com.pedrofuentes.cloudflare-utilities.ai-gateway-metric"
+    },
+    {
+      "Icon": "imgs/actions/worker-analytics",
+      "Name": "Worker Analytics",
+      "PropertyInspectorPath": "ui/worker-analytics.html",
+      "States": [
+        {
+          "Image": "imgs/actions/worker-analytics",
+          "ShowTitle": false
+        }
+      ],
+      "Tooltip": "Display analytics metrics from a Cloudflare Worker",
+      "UserTitleEnabled": false,
+      "UUID": "com.pedrofuentes.cloudflare-utilities.worker-analytics"
     }
   ],
   "Author": "Pedro Fuentes",
