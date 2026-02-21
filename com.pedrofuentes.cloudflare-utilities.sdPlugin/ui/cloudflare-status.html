@@ -3,21 +3,388 @@
   <head>
     <meta charset="utf-8" />
     <title>Cloudflare Status</title>
-    <link
-      rel="stylesheet"
-      href="https://sdpi-components.dev/releases/v3/sdpi-components.css"
-    />
-    <script src="https://sdpi-components.dev/releases/v3/sdpi-components.js"></script>
+    <style>
+      :root {
+        --bg: #2d2d2d;
+        --bg-input: #3d3d3d;
+        --border: #565656;
+        --text: #d8d8d8;
+        --text-muted: #969696;
+        --accent: #0078d4;
+        --error: #ff6b6b;
+        --success: #4ade80;
+        --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 12px;
+        line-height: 1.4;
+        padding: 0;
+        min-height: 100vh;
+      }
+
+      .sdpi-item {
+        display: flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 4px 16px;
+        gap: 8px;
+      }
+
+      .sdpi-item-label {
+        flex: 0 0 80px;
+        text-align: right;
+        color: var(--text-muted);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .sdpi-item-value {
+        flex: 1;
+        min-width: 0;
+      }
+
+      input[type="number"],
+      select {
+        width: 100%;
+        background: var(--bg-input);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 4px 8px;
+        font-family: var(--font);
+        font-size: 12px;
+        outline: none;
+      }
+
+      input:focus,
+      select:focus {
+        border-color: var(--accent);
+      }
+
+      select {
+        cursor: pointer;
+        appearance: auto;
+      }
+
+      .dropdown-row {
+        display: flex;
+        gap: 4px;
+        align-items: stretch;
+      }
+
+      .dropdown-row select {
+        flex: 1;
+      }
+
+      .load-btn {
+        flex: 0 0 auto;
+        background: var(--bg-input);
+        color: var(--text-muted);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 4px 5px 2px;
+        cursor: pointer;
+        font-size: 12px;
+        font-family: var(--font);
+        white-space: nowrap;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .load-btn:hover {
+        background: #4d4d4d;
+        color: var(--text);
+      }
+
+      .load-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .status-msg {
+        font-size: 10px;
+        color: var(--text-muted);
+        padding: 0 16px 0 96px;
+        min-height: 14px;
+      }
+
+      .separator {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 8px 16px;
+      }
+
+      .section-heading {
+        font-size: 11px;
+        font-weight: 600;
+        color: #969696;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 4px 16px 2px;
+        margin-top: 4px;
+      }
+
+      .tips {
+        font-size: 10px;
+        color: var(--text-muted);
+        padding: 8px 16px;
+        line-height: 1.5;
+      }
+    </style>
   </head>
   <body>
-    <sdpi-item label="Refresh Interval (seconds)">
-      <sdpi-textfield
-        setting="refreshIntervalSeconds"
-        placeholder="60"
-        type="number"
-        min="10"
-        max="3600"
-      ></sdpi-textfield>
-    </sdpi-item>
+    <div class="section-heading">Component</div>
+
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Monitor</div>
+      <div class="sdpi-item-value">
+        <div class="dropdown-row">
+          <select id="componentId">
+            <option value="">Overall Status</option>
+          </select>
+          <button type="button" id="loadComponentsBtn" class="load-btn" title="Load components from Cloudflare Status API">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.34 13a10 10 0 1 1-2.83-7.83L21.5 8"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="status-msg" id="componentStatus"></div>
+
+    <hr class="separator" />
+    <div class="section-heading">Settings</div>
+
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Refresh (s)</div>
+      <div class="sdpi-item-value">
+        <input
+          type="number"
+          id="refreshIntervalSeconds"
+          placeholder="60"
+          min="10"
+          max="3600"
+        />
+      </div>
+    </div>
+
+    <div class="tips">
+      <strong>Tip:</strong> Select "Overall Status" to show the global Cloudflare
+      health, or pick a specific component (CDN, DNS, Workers, etc.) to monitor
+      individually. The status API is public — no credentials required.
+    </div>
+
+    <script>
+      /* ───────── Stream Deck WebSocket ───────── */
+      var websocket = null;
+      var piUUID = "";
+      var actionSettings = {};
+
+      var STATUS_API = "https://www.cloudflarestatus.com/api/v2";
+
+      function connectElgatoStreamDeckSocket(
+        port,
+        uuid,
+        registerEvent,
+        info,
+        actionInfo
+      ) {
+        piUUID = uuid;
+
+        try {
+          var action = JSON.parse(actionInfo);
+          actionSettings = action?.payload?.settings || {};
+        } catch {
+          actionSettings = {};
+        }
+
+        websocket = new WebSocket("ws://127.0.0.1:" + port);
+
+        websocket.onopen = function () {
+          websocket.send(
+            JSON.stringify({ event: registerEvent, uuid: uuid })
+          );
+          populateActionFields();
+          // Auto-load components
+          loadComponents();
+        };
+
+        websocket.onmessage = function (evt) {
+          try {
+            var data = JSON.parse(evt.data);
+            if (data.event === "didReceiveSettings") {
+              actionSettings = data?.payload?.settings || {};
+              populateActionFields();
+            }
+          } catch {
+            // ignore
+          }
+        };
+      }
+
+      /* ───────── Settings ↔ Form ───────── */
+
+      var SIMPLE_FIELDS = ["refreshIntervalSeconds"];
+
+      function populateActionFields() {
+        SIMPLE_FIELDS.forEach(function (key) {
+          var el = document.getElementById(key);
+          if (el) el.value = actionSettings[key] || "";
+        });
+        // Ensure the saved component option exists in the dropdown
+        ensureOption(
+          "componentId",
+          actionSettings.componentId,
+          actionSettings.componentName
+        );
+      }
+
+      function ensureOption(selectId, value, label) {
+        if (!value) return;
+        var sel = document.getElementById(selectId);
+        if (!sel.querySelector('option[value="' + CSS.escape(value) + '"]')) {
+          var opt = document.createElement("option");
+          opt.value = value;
+          opt.textContent = label || value;
+          sel.appendChild(opt);
+        }
+        sel.value = value;
+      }
+
+      function saveActionSettings() {
+        SIMPLE_FIELDS.forEach(function (key) {
+          var el = document.getElementById(key);
+          if (el) actionSettings[key] = el.value;
+        });
+
+        // Handle component selection specially to save both ID and name
+        var componentSelect = document.getElementById("componentId");
+        actionSettings.componentId = componentSelect.value;
+        var selectedOption =
+          componentSelect.options[componentSelect.selectedIndex];
+        actionSettings.componentName = componentSelect.value
+          ? selectedOption.textContent
+          : "";
+
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+          websocket.send(
+            JSON.stringify({
+              event: "setSettings",
+              context: piUUID,
+              payload: actionSettings,
+            })
+          );
+        }
+      }
+
+      // Bind change/input events
+      SIMPLE_FIELDS.forEach(function (key) {
+        var el = document.getElementById(key);
+        if (el) {
+          el.addEventListener("input", saveActionSettings);
+          el.addEventListener("change", saveActionSettings);
+        }
+      });
+
+      document
+        .getElementById("componentId")
+        .addEventListener("change", saveActionSettings);
+
+      /* ───────── Helpers ───────── */
+
+      function showStatus(el, msg, type) {
+        el.textContent = msg;
+        el.style.color =
+          type === "error"
+            ? "#ff6b6b"
+            : type === "success"
+              ? "#4ade80"
+              : "#969696";
+      }
+
+      /* ───────── Component List Fetch ───────── */
+
+      var loadComponentsBtn = document.getElementById("loadComponentsBtn");
+      var componentSelect = document.getElementById("componentId");
+      var componentStatusDiv = document.getElementById("componentStatus");
+
+      loadComponentsBtn.addEventListener("click", function () {
+        loadComponents();
+      });
+
+      async function loadComponents() {
+        loadComponentsBtn.disabled = true;
+        showStatus(componentStatusDiv, "Loading components…", "info");
+
+        try {
+          var resp = await fetch(STATUS_API + "/components.json");
+
+          if (!resp.ok) {
+            throw new Error("HTTP " + resp.status);
+          }
+
+          var data = await resp.json();
+
+          if (!Array.isArray(data.components)) {
+            throw new Error("Unexpected response format");
+          }
+
+          var currentValue = componentSelect.value;
+
+          // Clear and rebuild
+          componentSelect.innerHTML = "";
+          var overall = document.createElement("option");
+          overall.value = "";
+          overall.textContent = "Overall Status";
+          componentSelect.appendChild(overall);
+
+          // Filter out group headers (components with group=true or no status)
+          // and sort alphabetically
+          var components = data.components
+            .filter(function (c) {
+              return c.group !== true && c.status;
+            })
+            .sort(function (a, b) {
+              return a.name.localeCompare(b.name);
+            });
+
+          components.forEach(function (c) {
+            var opt = document.createElement("option");
+            opt.value = c.id;
+            opt.textContent = c.name;
+            componentSelect.appendChild(opt);
+          });
+
+          // Restore selection
+          if (currentValue) {
+            componentSelect.value = currentValue;
+          }
+
+          showStatus(
+            componentStatusDiv,
+            components.length + " components loaded",
+            "success"
+          );
+        } catch (err) {
+          showStatus(
+            componentStatusDiv,
+            err.message || "Failed to load components",
+            "error"
+          );
+        } finally {
+          loadComponentsBtn.disabled = false;
+        }
+      }
+    </script>
   </body>
 </html>

@@ -4,6 +4,7 @@
     {
       "Icon": "imgs/actions/cloudflare-status",
       "Name": "Cloudflare Status",
+      "PropertyInspectorPath": "ui/cloudflare-status.html",
       "States": [
         {
           "Image": "imgs/actions/cloudflare-status",
