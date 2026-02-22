@@ -26,6 +26,7 @@
 15. [Rate Limiting & Backoff UX](#15-rate-limiting--backoff-ux)
 16. [Design Decisions Log (What Failed & Why)](#16-design-decisions-log-what-failed--why)
 17. [Checklist for New Actions](#17-checklist-for-new-actions)
+18. [References & Documentation](#18-references--documentation)
 
 ---
 
@@ -46,6 +47,8 @@ These are non-negotiable. They are backed by hardware testing.
 ---
 
 ## 2. Key Display — `setImage` vs `setTitle`
+
+> **SDK Reference**: [`action.setImage()`](https://docs.elgato.com/streamdeck/sdk/references/modules#setimage) · [`action.setTitle()`](https://docs.elgato.com/streamdeck/sdk/references/modules#settitle)
 
 ### Why `setTitle` Fails
 
@@ -92,6 +95,7 @@ await ev.action.setImage(`data:image/svg+xml,${encodeURIComponent(svg)}`);
 - **No animated formats**: GIF is not supported for `setImage`.
 - **Max 10 updates/second** per key — don't exceed this.
 - **Encoding**: `data:image/svg+xml,${encodeURIComponent(svg)}`.
+- **SDK docs**: [Dynamic images](https://docs.elgato.com/streamdeck/sdk/guides/dynamic-images) — official guide to rendering images on keys.
 
 ---
 
@@ -131,6 +135,8 @@ This is the standard layout for all actions in this plugin. It was tested on har
 ---
 
 ## 4. SVG Rendering Specifications
+
+> **SVG Reference**: [SVG 1.1 spec (W3C)](https://www.w3.org/TR/SVG11/) · [MDN SVG tutorial](https://developer.mozilla.org/en-US/docs/Web/SVG/Tutorial) · [`<text>` element](https://developer.mozilla.org/en-US/docs/Web/SVG/Element/text) · [`text-anchor`](https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/text-anchor)
 
 ### Design Principles for OLED
 
@@ -342,6 +348,8 @@ onWillDisappear(): void {
 
 ## 9. Manifest & Icon Configuration
 
+> **SDK Reference**: [Manifest reference](https://docs.elgato.com/streamdeck/sdk/references/manifest) · [Action reference](https://docs.elgato.com/streamdeck/sdk/references/manifest#action) · [State reference](https://docs.elgato.com/streamdeck/sdk/references/manifest#state) · [Icons & images](https://docs.elgato.com/streamdeck/sdk/guides/icons)
+
 ### Disable Default Title Overlay
 
 When using `setImage` to render everything, **disable the SDK title** to prevent overlay:
@@ -396,9 +404,11 @@ Available in manifest `States` entry:
 
 ## 10. Property Inspector (PI) Guidelines
 
+> **SDK Reference**: [Property Inspector overview](https://docs.elgato.com/streamdeck/sdk/guides/property-inspector) · [`sdpi-components` library](https://sdpi-components.dev/) · [PI communication](https://docs.elgato.com/streamdeck/sdk/guides/plugin-and-property-inspector-communication)
+
 ### Use the `sdpi-components` Library
 
-Provides consistent Elgato-styled UI components. Download locally for offline support:
+Provides consistent Elgato-styled UI components. [Component reference & live demos](https://sdpi-components.dev/). Download locally for offline support:
 
 ```html
 <script src="sdpi-components.js"></script>
@@ -454,6 +464,8 @@ actions → subscribe via onGlobalSettingsChanged() → re-initialize API client
 
 ## 11. Feedback Patterns
 
+> **SDK Reference**: [`showOk()`](https://docs.elgato.com/streamdeck/sdk/references/modules#showok) · [`showAlert()`](https://docs.elgato.com/streamdeck/sdk/references/modules#showalert)
+
 | Scenario | Method |
 |----------|--------|
 | Action succeeded, no visual change needed | `ev.action.showOk()` — brief checkmark overlay |
@@ -465,6 +477,8 @@ actions → subscribe via onGlobalSettingsChanged() → re-initialize API client
 ---
 
 ## 12. Device Specifications
+
+> **Source**: [Elgato product pages](https://www.elgato.com/stream-deck) · [SDK device info](https://docs.elgato.com/streamdeck/sdk/references/manifest#profiles)
 
 | Device | Keys | Physical Resolution | Design Canvas |
 |--------|------|---------------------|---------------|
@@ -638,10 +652,73 @@ When adding a new action, verify all UI requirements:
 
 ---
 
+---
+
+## 18. References & Documentation
+
+External documentation and resources used while building this plugin's UI.
+
+### Stream Deck SDK
+
+| Resource | URL |
+|----------|-----|
+| SDK documentation (main) | https://docs.elgato.com/streamdeck/sdk/introduction |
+| Manifest reference | https://docs.elgato.com/streamdeck/sdk/references/manifest |
+| Action lifecycle events | https://docs.elgato.com/streamdeck/sdk/references/modules |
+| Dynamic images guide | https://docs.elgato.com/streamdeck/sdk/guides/dynamic-images |
+| Icons & images guide | https://docs.elgato.com/streamdeck/sdk/guides/icons |
+| Property Inspector guide | https://docs.elgato.com/streamdeck/sdk/guides/property-inspector |
+| PI ↔ Plugin communication | https://docs.elgato.com/streamdeck/sdk/guides/plugin-and-property-inspector-communication |
+| Global settings | https://docs.elgato.com/streamdeck/sdk/guides/global-settings |
+| Stream Deck CLI | https://docs.elgato.com/streamdeck/cli/intro |
+| `@elgato/streamdeck` npm | https://www.npmjs.com/package/@elgato/streamdeck |
+| `@elgato/cli` npm | https://www.npmjs.com/package/@elgato/cli |
+
+### sdpi-components (Property Inspector UI)
+
+| Resource | URL |
+|----------|-----|
+| Component reference & demos | https://sdpi-components.dev/ |
+| Releases (JS download) | https://sdpi-components.dev/releases/v3/sdpi-components.js |
+| CSS (remote) | https://sdpi-components.dev/releases/v3/sdpi-components.css |
+
+### SVG
+
+| Resource | URL |
+|----------|-----|
+| SVG 1.1 specification (W3C) | https://www.w3.org/TR/SVG11/ |
+| MDN SVG tutorial | https://developer.mozilla.org/en-US/docs/Web/SVG/Tutorial |
+| MDN `<text>` element | https://developer.mozilla.org/en-US/docs/Web/SVG/Element/text |
+| MDN `<rect>` element | https://developer.mozilla.org/en-US/docs/Web/SVG/Element/rect |
+| MDN `text-anchor` attribute | https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/text-anchor |
+| MDN `font-family` in SVG | https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/font-family |
+| Data URIs (MDN) | https://developer.mozilla.org/en-US/docs/Web/URI/Reference/Schemes/data |
+
+### Cloudflare APIs
+
+| Resource | URL |
+|----------|-----|
+| Cloudflare API v4 docs | https://developers.cloudflare.com/api/ |
+| Workers API | https://developers.cloudflare.com/api/resources/workers/ |
+| AI Gateway | https://developers.cloudflare.com/ai-gateway/ |
+| Statuspage.io API (public) | https://www.atlassian.com/software/statuspage/api |
+| Cloudflare Status (Statuspage) | https://yh6f0r4529hb.statuspage.io/api/v2 |
+
+### Color Reference
+
+| Resource | URL |
+|----------|-----|
+| Tailwind CSS color palette | https://tailwindcss.com/docs/colors |
+
+> The `STATUS_COLORS` palette (`#4ade80`, `#fbbf24`, `#f87171`, `#60a5fa`, `#fb923c`, `#9ca3af`) is derived from the Tailwind CSS color system — green-400, amber-400, red-400, blue-400, orange-400, and gray-400 respectively. These were selected for high visibility on OLED displays.
+
+---
+
 ## Updating This Document
 
 When you discover new UI patterns, SDK capabilities, or hardware quirks:
 1. Add findings to the relevant section above
 2. Add failures to the [Design Decisions Log](#16-design-decisions-log-what-failed--why) so they're not repeated
 3. Keep entries concise — this is a reference, not a tutorial
-4. Reference `AGENTS.md` for project rules and `TESTING-PROTOCOL.md` for test patterns
+4. Add new external references to [section 18](#18-references--documentation)
+5. Reference `AGENTS.md` for project rules and `TESTING-PROTOCOL.md` for test patterns
