@@ -2,6 +2,18 @@
 
 This document provides instructions for AI agents and automated contributors working on this project.
 
+## Companion Guides
+
+This file covers project rules, architecture, and workflow. Detailed guides live in dedicated files — **read them when working in those areas**:
+
+| Document | When to Read |
+|----------|-------------|
+| **`UI-DESIGN-GUIDE.md`** | Any work involving key display, SVG rendering, colors, layout, marquee, icons, Property Inspector, or visual changes. Contains all hardware-tested UX patterns, the color palette, font specs, and a log of failed design attempts. |
+| **`TESTING-PROTOCOL.md`** | Any work involving writing tests, mocking patterns, timer testing, coverage, or pre-release validation. Contains recipes, pitfalls, and the mandatory manual device testing protocol. |
+| **`SKILLS.md`** | Deep reference: raw research data, SDK component catalog, device specs, and the complete design decisions log. Read before making novel UI changes. |
+
+---
+
 ## Project Overview
 
 This is a **Stream Deck plugin** built with:
@@ -13,6 +25,8 @@ This is a **Stream Deck plugin** built with:
 - **Plugin UUID**: `com.pedrofuentes.cloudflare-utilities`
 - **Repository**: https://github.com/pedrofuentes/stream-deck-cloudflare-utilities
 
+---
+
 ## Critical Rules
 
 ### 1. Tests Are Mandatory
@@ -21,16 +35,21 @@ This is a **Stream Deck plugin** built with:
 - Edge cases must always be covered: empty inputs, error states, network failures, unexpected data shapes, boundary values.
 - Ensure no regression — run `npm test` and verify 100% pass rate.
 - Coverage thresholds: 80% branches, functions, lines, statements.
+- **See `TESTING-PROTOCOL.md`** for mocking patterns, timer testing recipes, and coverage details.
 
-### 2. Testing Commands
+### 2. UI Changes Require Hardware Testing
+- All visual changes must be tested on a **physical Stream Deck device**.
+- Monitor screenshots are not sufficient — OLED displays have different gamma.
+- **See `UI-DESIGN-GUIDE.md`** for the accent bar pattern, color palette, font specs, and proven layouts.
+
+### 3. Commands
 ```bash
-npm test              # Run all tests (must pass before deploy)
+# Testing
+npm test              # Run all tests (must pass before every commit)
 npm run test:watch    # Watch mode during development
 npm run test:coverage # Generate coverage report
-```
 
-### 3. Build & Validation
-```bash
+# Building
 npm run build         # Build with Rollup
 npm run lint          # TypeScript type-check (no emit)
 npm run validate      # Validate plugin with Stream Deck CLI
@@ -38,7 +57,6 @@ npm run pack          # Full build + package (runs tests first via prepack)
 ```
 
 ### 4. Release Packaging
-To create a release package, use the Stream Deck CLI:
 ```bash
 npm run pack
 ```
@@ -75,13 +93,7 @@ This runs `prepack` (test + lint), then `build`, then `streamdeck pack` to produ
 - The Stream Deck CLI has **no automated functional testing** capability. All real verification must happen on the physical device.
 
 #### What to verify on device
-- All actions appear in the Stream Deck action list with correct icons.
-- Each action's Property Inspector loads correctly and all dropdowns/settings work.
-- Keys render with correct accent bar colors, text, and layout.
-- Polling/refresh works (data updates after the configured interval).
-- Key presses cycle metrics or trigger expected behavior.
-- Marquee scrolling works for long names (> 10 characters).
-- Error states display correctly (no credentials, bad API response, etc.).
+See **`TESTING-PROTOCOL.md` → "Pre-Release Testing Protocol"** for the full device verification checklist.
 
 #### Release flow (after user confirms)
 ```bash
@@ -94,6 +106,8 @@ git tag vx.y.z
 git push origin main --tags
 npm run pack  # Produces dist/*.streamDeckPlugin
 ```
+
+---
 
 ## Architecture
 
@@ -129,6 +143,8 @@ com.pedrofuentes.cloudflare-utilities.sdPlugin/  # Compiled plugin
 - Plugin: `com.pedrofuentes.cloudflare-utilities`
 - Actions: `com.pedrofuentes.cloudflare-utilities.<action-name>`
 
+---
+
 ## How to Add a New Action
 
 1. **Create** `src/actions/<action-name>.ts` with a class extending `SingletonAction`.
@@ -136,8 +152,9 @@ com.pedrofuentes.cloudflare-utilities.sdPlugin/  # Compiled plugin
 3. **Add** the action to `com.pedrofuentes.cloudflare-utilities.sdPlugin/manifest.json`.
 4. **Create** `com.pedrofuentes.cloudflare-utilities.sdPlugin/ui/<action-name>.html` if the action needs settings.
 5. **Add** icon SVGs in `com.pedrofuentes.cloudflare-utilities.sdPlugin/imgs/actions/`.
-6. **Write tests** in `tests/actions/<action-name>.test.ts`.
-7. **Update** `README.md` to document the new action.
+6. **Write tests** in `tests/actions/<action-name>.test.ts` — see `TESTING-PROTOCOL.md` for patterns.
+7. **Follow UI rules** in `UI-DESIGN-GUIDE.md` — use the shared renderer, accent bar pattern, etc.
+8. **Update** `README.md` to document the new action.
 
 ## How to Add a New Service
 
@@ -146,40 +163,35 @@ com.pedrofuentes.cloudflare-utilities.sdPlugin/  # Compiled plugin
 3. **Write tests** in `tests/services/<service-name>.test.ts`.
 4. **Mock external calls** using `vi.fn()` / `vi.stubGlobal()` — never make real HTTP calls in tests.
 
+---
+
 ## Testing Guidelines
 
-### Mocking
+**Full details in `TESTING-PROTOCOL.md`.** Key points:
 
-- Use `vi.stubGlobal("fetch", mockFetch)` for HTTP calls.
-- Use `vi.fn()` for function mocks.
-- Use `vi.spyOn()` when you need to observe calls to existing methods.
-- Reset mocks in `beforeEach`.
+- Mock `fetch` with `vi.stubGlobal("fetch", mockFetch)`.
+- Mock the Stream Deck SDK module in every action test.
+- Use `vi.useFakeTimers()` / `vi.advanceTimersByTimeAsync()` for timer tests.
+- Always restore real timers in `afterEach`.
+- Test all HTTP error codes (400, 401, 403, 404, 429, 500, 502, 503).
+- Test network failures, JSON parse errors, empty inputs, boundary values.
+- See `TESTING-PROTOCOL.md` for recipes: marquee testing, backoff testing, polling testing.
 
-### Test Structure
+---
 
-```typescript
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+## UI / Key Display Rules
 
-describe("ComponentName", () => {
-  describe("methodName", () => {
-    it("should handle happy path", () => { /* ... */ });
-    it("should handle empty input", () => { /* ... */ });
-    it("should handle error conditions", () => { /* ... */ });
-    it("should handle edge cases", () => { /* ... */ });
-  });
-});
-```
+**Full details in `UI-DESIGN-GUIDE.md`.** Non-negotiable summary:
 
-### What to Test
+1. **Always use `setImage`**, never `setTitle` alone.
+2. **Use the accent bar pattern** — 6px colored bar at top.
+3. **Center all text** — `text-anchor="middle"` at `x="72"`.
+4. **Use the shared renderer** — `src/services/key-image-renderer.ts`.
+5. **Manifest**: `"ShowTitle": false` in `States`, `"UserTitleEnabled": false` at Action level.
+6. **Marquee** for names > 10 characters — use `MarqueeController`.
+7. **Action list icons**: monochromatic white on transparent, 20×20 SVG.
 
-- ✅ Return values for all input variations
-- ✅ Error throwing and error messages
-- ✅ HTTP error status codes (400, 401, 403, 404, 429, 500, 502, 503)
-- ✅ Network failures (fetch rejection)
-- ✅ JSON parse failures
-- ✅ Empty/null/undefined inputs
-- ✅ Boundary values
-- ✅ Type correctness for API response shapes
+---
 
 ## Documentation Updates
 
@@ -187,6 +199,11 @@ Whenever you make changes that affect the project:
 - Update `README.md` (features, scripts, structure, etc.)
 - Update `CONTRIBUTING.md` if development workflow changes.
 - Update this file (`AGENTS.md`) if architecture or conventions change.
+- Update `UI-DESIGN-GUIDE.md` if visual patterns or discoveries change.
+- Update `TESTING-PROTOCOL.md` if testing patterns or pitfalls change.
+- Update `SKILLS.md` if new raw research or SDK findings are discovered.
+
+---
 
 ## Commit Messages
 
@@ -197,6 +214,8 @@ fix(services): handle API rate limiting
 test(services): add timeout edge case tests
 docs(readme): add zone analytics documentation
 ```
+
+---
 
 ## Branching Model
 
@@ -254,12 +273,16 @@ main ─────────────────────────
 - After all branches for a version are merged, bump the version, run `npm run pack`, and create a GitHub release.
 - Version tags (`v1.1.0`, `v1.2.0`) are created on `main` after merging.
 
+---
+
 ## Environment
 
 - No `.env` files are committed. API keys are stored in **Stream Deck global settings** (shared across all actions) via the setup window.
-- The Cloudflare Status API (`https://www.cloudflarestatus.com/api/v2`) is public and requires no authentication.
+- The Cloudflare Status API uses the Statuspage.io endpoint (`yh6f0r4529hb.statuspage.io/api/v2`) — public, no auth required. The `www.cloudflarestatus.com` domain is behind CloudFront WAF and blocks programmatic requests with 403.
 - The Cloudflare Workers API and AI Gateway GraphQL API require user-provided API tokens stored in global settings.
 - Rate limiting (HTTP 429) is handled with graceful backoff — see `RateLimitError` in `cloudflare-ai-gateway-api.ts`.
+
+---
 
 ## Global Settings Architecture
 
@@ -278,76 +301,7 @@ API credentials (API Token, Account ID) are shared across all actions via Stream
 2. Update `setup.html` with new input fields.
 3. Actions automatically pick up changes via the pub/sub system.
 
-## Marquee (Scrolling Text) System
-
-Long names (> 10 characters) are animated with a circular marquee scroll on the key display.
-
-### Key files
-- **`src/services/marquee-controller.ts`** — Reusable, framework-agnostic marquee state machine.
-- **Integration** in `src/actions/ai-gateway-metric.ts` — 500ms tick interval, `MARQUEE_PAUSE_TICKS = 3` pause at start of each loop.
-- **Separator**: `"  •  "` (2 spaces + bullet + 2 spaces) between text repetitions.
-
-### How to use `MarqueeController`
-```typescript
-const marquee = new MarqueeController(10); // maxVisible chars
-marquee.setText("some-long-gateway-name");
-
-if (marquee.needsAnimation()) {
-  // Start a setInterval that calls marquee.tick() every 500ms
-  // On tick() returning true, re-render with marquee.getCurrentText()
-}
-```
-
-## UI / Key Display Design Rules
-
-**These rules are mandatory.** They were validated on hardware and produce the best
-readability on the tiny OLED keys. Do not deviate without testing on a physical device.
-
-### 1. Always use `setImage`, never `setTitle` alone
-- Render all key content as dynamic SVGs via `setImage()`.
-- Use the shared renderer: `src/services/key-image-renderer.ts`.
-- `setTitle` produces tiny, unstyled text. Emoji rendering is inconsistent. Do not use it.
-
-### 2. Use the accent bar pattern
-- A **6px colored bar** across the top of the key is the status indicator.
-- Do NOT use small dots, icons, or emoji for status — they're invisible on 72×72 OLED.
-- The accent bar color maps to `STATUS_COLORS` in the renderer.
-
-### 3. Center all text
-- All text must be `text-anchor="middle"` at `x="72"` (center of 144px canvas).
-- Left-aligned text wastes space and looks unbalanced on small keys.
-
-### 4. Font sizing (at 144×144 canvas)
-- **Line 2 (main status)**: 30px, bold, white `#ffffff`
-- **Line 1 (identifier)**: 18px, normal, gray `#9ca3af`
-- **Line 3 (metadata)**: 15px, normal, gray `#9ca3af`
-- These sizes were tested on hardware. Do not make them smaller.
-
-### 5. Manifest states
-- Every action must set `"ShowTitle": false` in its `States` entry.
-- Every action must set `"UserTitleEnabled": false` at the **Action level** (sibling of `States`, not inside it). This prevents the SDK title from overlaying our SVG.
-
-### 6. Action list icons
-- Must be **monochromatic white** on **transparent background**.
-- SVG format, 20×20 viewBox.
-- No colored fills, no solid backgrounds.
-
-### 7. Reuse the renderer
-- Do NOT generate SVG strings directly in action files.
-- Import from `key-image-renderer.ts`. Add new render functions there if needed.
-- Keep the accent bar + centered text pattern consistent across all actions.
-
-### 8. Refer to SKILLS.md
-- `SKILLS.md` contains detailed research, color palette, PI guidelines, device
-  sizes, and layout templates. Read it before making UI changes.
-
-## How to Modify Key Visuals
-
-1. **Edit** `src/services/key-image-renderer.ts` (shared renderer).
-2. **Update tests** in `tests/services/key-image-renderer.test.ts`.
-3. **Build**, **restart plugin** (`streamdeck restart com.pedrofuentes.cloudflare-utilities`).
-4. **Verify on physical device** — monitor screenshots are not sufficient.
-5. **Update SKILLS.md** if new patterns are discovered.
+---
 
 ## Contributing Learnings Back to the Template
 
