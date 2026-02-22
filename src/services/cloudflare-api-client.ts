@@ -14,7 +14,7 @@ import type {
   CloudflareStatusApiResponse,
 } from "../types/cloudflare";
 
-const CLOUDFLARE_STATUS_API = "https://www.cloudflarestatus.com/api/v2";
+const CLOUDFLARE_STATUS_API = "https://yh6f0r4529hb.statuspage.io/api/v2";
 
 /**
  * Client for interacting with the Cloudflare Status API.
@@ -22,7 +22,11 @@ const CLOUDFLARE_STATUS_API = "https://www.cloudflarestatus.com/api/v2";
  * Uses the public Cloudflare status page API (Atlassian Statuspage format).
  * No authentication is required for this endpoint.
  *
- * @see https://www.cloudflarestatus.com/api/v2
+ * The custom domain (www.cloudflarestatus.com) is behind CloudFront which
+ * blocks programmatic API requests with 403. The direct statuspage.io URL
+ * works reliably.
+ *
+ * @see https://yh6f0r4529hb.statuspage.io/api/v2
  */
 export class CloudflareApiClient {
   private baseUrl: string;
