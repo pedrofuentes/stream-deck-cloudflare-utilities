@@ -102,6 +102,7 @@ See **`.github/TESTING-PROTOCOL.md` → "Pre-Release Testing Protocol"** for the
 # Version bump
 # Edit package.json → new version
 # Edit manifest.json → new Version (x.y.z.0 format)
+# Update ROADMAP.md (current version header + rollout table)
 
 git add -A && git commit -m "chore: bump version to x.y.z"
 git tag vx.y.z
@@ -109,12 +110,28 @@ git push origin main --tags
 npm run pack  # Produces dist/*.streamDeckPlugin
 ```
 
+#### Create GitHub Release (MANDATORY)
+**Every release MUST have a GitHub Release with the `.streamDeckPlugin` package attached.** This is the primary distribution method for end users.
+
+1. Run `npm run pack` — this produces `dist/com.pedrofuentes.cloudflare-utilities.streamDeckPlugin`.
+2. Create a GitHub Release for tag `vx.y.z` via the GitHub CLI or web UI:
+   ```bash
+   gh release create vx.y.z dist/com.pedrofuentes.cloudflare-utilities.streamDeckPlugin \
+     --title "vx.y.z" \
+     --notes "Release notes here" \
+     --repo pedrofuentes/stream-deck-cloudflare-utilities
+   ```
+3. The release notes should summarize what changed (features, fixes, refactors).
+4. The `.streamDeckPlugin` file must be attached as a release asset so users can download and double-click to install.
+
+**Never skip the GitHub Release.** A git tag without a GitHub Release and attached package is an incomplete release.
+
 #### Post-release — Update Roadmap (MANDATORY)
 After every release, update `ROADMAP.md`:
 1. Update the `Current version` in the header.
 2. Strike-through the shipped version row in the **Recommended Rollout Order** table.
 3. If new items were shipped that aren't in the table, add them as a new row.
-4. Commit: `git add ROADMAP.md && git commit -m "docs(roadmap): update for vx.y.z" && git push origin main`
+4. These changes should be included in the version bump commit (before tagging), not as a separate commit.
 
 ---
 
