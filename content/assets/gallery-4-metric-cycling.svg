@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 960" width="1920" height="960">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="accentLine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f6821f" stop-opacity="0"/>
+      <stop offset="30%" stop-color="#f6821f"/>
+      <stop offset="70%" stop-color="#fbad41"/>
+      <stop offset="100%" stop-color="#fbad41" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1920" height="960" fill="url(#bgGrad)"/>
+
+  <!-- Title -->
+  <text x="960" y="80" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="42" font-weight="700" fill="#ffffff">Cycle Through Metrics with a Key Press</text>
+  <text x="960" y="120" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="22" fill="#9ca3af">Press any metric key to cycle through all available data points</text>
+  <rect x="660" y="140" width="600" height="3" rx="1.5" fill="url(#accentLine)"/>
+
+  <!-- AI Gateway Metric Cycling -->
+  <text x="200" y="220" font-family="'Segoe UI', Arial, sans-serif" font-size="26" font-weight="600" fill="#ffffff">AI Gateway Metrics</text>
+  <text x="575" y="220" font-family="'Segoe UI', Arial, sans-serif" font-size="16" fill="#9ca3af">— press to cycle →</text>
+
+  <g transform="translate(200, 250)">
+    <!-- Requests -->
+    <g transform="translate(0, 0)">
+      <rect width="150" height="150" rx="16" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="10" y="8" width="130" height="6" rx="3" fill="#60a5fa"/>
+      <text x="75" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af">prod-gw</text>
+      <text x="75" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">48.2K</text>
+      <text x="75" y="112" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#9ca3af">Requests · 24h</text>
+    </g>
+
+    <!-- Arrow -->
+    <text x="170" y="80" font-family="Arial, sans-serif" font-size="20" fill="#f6821f">→</text>
+
+    <!-- Tokens -->
+    <g transform="translate(195, 0)">
+      <rect width="150" height="150" rx="16" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="10" y="8" width="130" height="6" rx="3" fill="#60a5fa"/>
+      <text x="75" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af">prod-gw</text>
+      <text x="75" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">1.2M</text>
+      <text x="75" y="112" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#9ca3af">Tokens · 24h</text>
+    </g>
+
+    <text x="365" y="80" font-family="Arial, sans-serif" font-size="20" fill="#f6821f">→</text>
+
+    <!-- Cost -->
+    <g transform="translate(390, 0)">
+      <rect width="150" height="150" rx="16" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="10" y="8" width="130" height="6" rx="3" fill="#4ade80"/>
+      <text x="75" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af">prod-gw</text>
+      <text x="75" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">$3.42</text>
+      <text x="75" y="112" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#9ca3af">Cost · 24h</text>
+    </g>
+
+    <text x="560" y="80" font-family="Arial, sans-serif" font-size="20" fill="#f6821f">→</text>
+
+    <!-- Errors -->
+    <g transform="translate(585, 0)">
+      <rect width="150" height="150" rx="16" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="10" y="8" width="130" height="6" rx="3" fill="#f87171"/>
+      <text x="75" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af">prod-gw</text>
+      <text x="75" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">23</text>
+      <text x="75" y="112" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#9ca3af">Errors · 24h</text>
+    </g>
+
+    <text x="755" y="80" font-family="Arial, sans-serif" font-size="20" fill="#f6821f">→</text>
+
+    <!-- Error Rate -->
+    <g transform="translate(780, 0)">
+      <rect width="150" height="150" rx="16" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="10" y="8" width="130" height="6" rx="3" fill="#f87171"/>
+      <text x="75" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af">prod-gw</text>
+      <text x="75" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">0.05%</text>
+      <text x="75" y="112" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#9ca3af">Error Rate · 24h</text>
+    </g>
+
+    <text x="950" y="80" font-family="Arial, sans-serif" font-size="20" fill="#f6821f">→</text>
+
+    <!-- Cache Hit Rate -->
+    <g transform="translate(975, 0)">
+      <rect width="150" height="150" rx="16" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="10" y="8" width="130" height="6" rx="3" fill="#4ade80"/>
+      <text x="75" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af">prod-gw</text>
+      <text x="75" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">72%</text>
+      <text x="75" y="112" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#9ca3af">Cache Hit · 24h</text>
+    </g>
+  </g>
+
+  <!-- Worker Analytics Cycling -->
+  <text x="200" y="560" font-family="'Segoe UI', Arial, sans-serif" font-size="26" font-weight="600" fill="#ffffff">Worker Analytics</text>
+  <text x="510" y="560" font-family="'Segoe UI', Arial, sans-serif" font-size="16" fill="#9ca3af">— press to cycle →</text>
+
+  <g transform="translate(200, 590)">
+    <!-- Requests -->
+    <g transform="translate(0, 0)">
+      <rect width="150" height="150" rx="16" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="10" y="8" width="130" height="6" rx="3" fill="#60a5fa"/>
+      <text x="75" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af">api-worker</text>
+      <text x="75" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">156K</text>
+      <text x="75" y="112" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#9ca3af">Requests · 7d</text>
+    </g>
+
+    <text x="170" y="80" font-family="Arial, sans-serif" font-size="20" fill="#f6821f">→</text>
+
+    <!-- Success Rate -->
+    <g transform="translate(195, 0)">
+      <rect width="150" height="150" rx="16" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="10" y="8" width="130" height="6" rx="3" fill="#4ade80"/>
+      <text x="75" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af">api-worker</text>
+      <text x="75" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">99.8%</text>
+      <text x="75" y="112" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#9ca3af">Success · 7d</text>
+    </g>
+
+    <text x="365" y="80" font-family="Arial, sans-serif" font-size="20" fill="#f6821f">→</text>
+
+    <!-- Errors -->
+    <g transform="translate(390, 0)">
+      <rect width="150" height="150" rx="16" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="10" y="8" width="130" height="6" rx="3" fill="#f87171"/>
+      <text x="75" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af">api-worker</text>
+      <text x="75" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">312</text>
+      <text x="75" y="112" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#9ca3af">Errors · 7d</text>
+    </g>
+
+    <text x="560" y="80" font-family="Arial, sans-serif" font-size="20" fill="#f6821f">→</text>
+
+    <!-- CPU Time -->
+    <g transform="translate(585, 0)">
+      <rect width="150" height="150" rx="16" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="10" y="8" width="130" height="6" rx="3" fill="#60a5fa"/>
+      <text x="75" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af">api-worker</text>
+      <text x="75" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">2.3ms</text>
+      <text x="75" y="112" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#9ca3af">CPU Time · 7d</text>
+    </g>
+  </g>
+
+  <!-- Right side: explanation -->
+  <g transform="translate(1350, 600)">
+    <rect width="450" height="220" rx="16" fill="#161b22" stroke="#2d2d44" stroke-width="1"/>
+    <text x="225" y="35" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="20" font-weight="700" fill="#ffffff">How It Works</text>
+    <line x1="30" y1="50" x2="420" y2="50" stroke="#2d2d44" stroke-width="1"/>
+
+    <text x="30" y="80" font-family="'Segoe UI', Arial, sans-serif" font-size="15" fill="#9ca3af">1. Pick your starting metric in settings</text>
+    <text x="30" y="108" font-family="'Segoe UI', Arial, sans-serif" font-size="15" fill="#9ca3af">2. Press the key to cycle to the next one</text>
+    <text x="30" y="136" font-family="'Segoe UI', Arial, sans-serif" font-size="15" fill="#9ca3af">3. Data updates automatically on your interval</text>
+    <text x="30" y="164" font-family="'Segoe UI', Arial, sans-serif" font-size="15" fill="#9ca3af">4. Choose 24h, 7d, or 30d time windows</text>
+    <text x="30" y="200" font-family="'Segoe UI', Arial, sans-serif" font-size="14" fill="#f6821f">One key = all the metrics you need</text>
+  </g>
+</svg>

@@ -26,7 +26,8 @@
     "streamdeck:validate": "streamdeck validate release/com.pedrofuentes.cloudflare-utilities.sdPlugin",
     "streamdeck:pack": "npm run build:production && streamdeck pack release/com.pedrofuentes.cloudflare-utilities.sdPlugin --output dist",
     "streamdeck:dev": "streamdeck dev",
-    "streamdeck:dev:disable": "streamdeck dev --disable"
+    "streamdeck:dev:disable": "streamdeck dev --disable",
+    "content:assets": "npx tsx scripts/convert-content-assets.ts"
   },
   "keywords": [
     "stream-deck",
@@ -51,6 +52,7 @@
   },
   "devDependencies": {
     "@elgato/cli": "^1.7.1",
+    "@resvg/resvg-js": "^2.6.2",
     "@rollup/plugin-commonjs": "^29.0.0",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-typescript": "^12.3.0",

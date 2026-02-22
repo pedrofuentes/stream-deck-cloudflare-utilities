@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 960" width="1920" height="960">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="accentLine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f6821f" stop-opacity="0"/>
+      <stop offset="30%" stop-color="#f6821f"/>
+      <stop offset="70%" stop-color="#fbad41"/>
+      <stop offset="100%" stop-color="#fbad41" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1920" height="960" fill="url(#bgGrad)"/>
+
+  <!-- Title -->
+  <text x="960" y="80" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="42" font-weight="700" fill="#ffffff">Easy Setup &amp; Configuration</text>
+  <text x="960" y="120" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="22" fill="#9ca3af">One-time credentials, smart dropdowns — be monitoring in under a minute</text>
+  <rect x="660" y="140" width="600" height="3" rx="1.5" fill="url(#accentLine)"/>
+
+  <!-- Setup Window Mockup (left) -->
+  <g transform="translate(120, 200)">
+    <!-- Window frame -->
+    <rect width="500" height="500" rx="12" fill="#1e1e2e" stroke="#3d3d5c" stroke-width="1"/>
+    <!-- Title bar -->
+    <rect width="500" height="40" rx="12" fill="#2d2d44"/>
+    <rect y="28" width="500" height="12" fill="#2d2d44"/>
+    <circle cx="20" cy="20" r="6" fill="#f87171"/>
+    <circle cx="40" cy="20" r="6" fill="#fbbf24"/>
+    <circle cx="60" cy="20" r="6" fill="#4ade80"/>
+    <text x="250" y="25" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="14" fill="#9ca3af">Cloudflare API Setup</text>
+
+    <!-- Form content -->
+    <g transform="translate(30, 70)">
+      <text x="0" y="0" font-family="'Segoe UI', Arial, sans-serif" font-size="14" font-weight="600" fill="#ffffff">API Token</text>
+      <rect x="0" y="12" width="440" height="36" rx="6" fill="#0d1117" stroke="#3d3d5c" stroke-width="1"/>
+      <text x="12" y="36" font-family="'Courier New', monospace" font-size="13" fill="#9ca3af">••••••••••••••••••••••</text>
+
+      <text x="0" y="80" font-family="'Segoe UI', Arial, sans-serif" font-size="14" font-weight="600" fill="#ffffff">Account ID</text>
+      <rect x="0" y="92" width="440" height="36" rx="6" fill="#0d1117" stroke="#3d3d5c" stroke-width="1"/>
+      <text x="12" y="116" font-family="'Courier New', monospace" font-size="13" fill="#9ca3af">a1b2c3d4e5f6789012345678</text>
+
+      <!-- Save button -->
+      <rect x="150" y="160" width="140" height="40" rx="8" fill="#f6821f"/>
+      <text x="220" y="185" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="16" font-weight="600" fill="#ffffff">Save</text>
+
+      <!-- Status -->
+      <circle cx="195" cy="230" r="6" fill="#4ade80"/>
+      <text x="210" y="234" font-family="'Segoe UI', Arial, sans-serif" font-size="14" fill="#4ade80">Credentials saved successfully</text>
+    </g>
+
+    <!-- Label -->
+    <text x="250" y="540" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="18" font-weight="600" fill="#f6821f">Step 1: Enter Credentials</text>
+  </g>
+
+  <!-- Arrow -->
+  <g transform="translate(680, 430)">
+    <line x1="0" y1="0" x2="80" y2="0" stroke="#f6821f" stroke-width="3" stroke-linecap="round"/>
+    <polygon points="80,0 65,-10 65,10" fill="#f6821f"/>
+  </g>
+
+  <!-- Property Inspector Mockup (center) -->
+  <g transform="translate(800, 200)">
+    <!-- Window frame -->
+    <rect width="500" height="500" rx="12" fill="#1e1e2e" stroke="#3d3d5c" stroke-width="1"/>
+    <!-- Title bar -->
+    <rect width="500" height="40" rx="12" fill="#2d2d44"/>
+    <rect y="28" width="500" height="12" fill="#2d2d44"/>
+    <circle cx="20" cy="20" r="6" fill="#f87171"/>
+    <circle cx="40" cy="20" r="6" fill="#fbbf24"/>
+    <circle cx="60" cy="20" r="6" fill="#4ade80"/>
+    <text x="250" y="25" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="14" fill="#9ca3af">Worker Analytics</text>
+
+    <!-- Form content -->
+    <g transform="translate(30, 70)">
+      <text x="0" y="0" font-family="'Segoe UI', Arial, sans-serif" font-size="14" font-weight="600" fill="#ffffff">Worker</text>
+      <rect x="0" y="12" width="440" height="36" rx="6" fill="#0d1117" stroke="#3d3d5c" stroke-width="1"/>
+      <text x="12" y="36" font-family="'Segoe UI', Arial, sans-serif" font-size="13" fill="#ffffff">api-worker</text>
+      <text x="420" y="36" text-anchor="end" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af">▼</text>
+
+      <text x="0" y="80" font-family="'Segoe UI', Arial, sans-serif" font-size="14" font-weight="600" fill="#ffffff">Metric</text>
+      <rect x="0" y="92" width="440" height="36" rx="6" fill="#0d1117" stroke="#3d3d5c" stroke-width="1"/>
+      <text x="12" y="116" font-family="'Segoe UI', Arial, sans-serif" font-size="13" fill="#ffffff">Requests</text>
+      <text x="420" y="116" text-anchor="end" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af">▼</text>
+
+      <text x="0" y="160" font-family="'Segoe UI', Arial, sans-serif" font-size="14" font-weight="600" fill="#ffffff">Time Range</text>
+      <rect x="0" y="172" width="440" height="36" rx="6" fill="#0d1117" stroke="#3d3d5c" stroke-width="1"/>
+      <text x="12" y="196" font-family="'Segoe UI', Arial, sans-serif" font-size="13" fill="#ffffff">Last 24 Hours</text>
+      <text x="420" y="196" text-anchor="end" font-family="Arial, sans-serif" font-size="12" fill="#9ca3af">▼</text>
+
+      <text x="0" y="240" font-family="'Segoe UI', Arial, sans-serif" font-size="14" font-weight="600" fill="#ffffff">Refresh Interval</text>
+      <rect x="0" y="252" width="440" height="36" rx="6" fill="#0d1117" stroke="#3d3d5c" stroke-width="1"/>
+      <text x="12" y="276" font-family="'Segoe UI', Arial, sans-serif" font-size="13" fill="#ffffff">60 seconds</text>
+
+      <!-- Setup link -->
+      <text x="220" y="340" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="14" fill="#60a5fa" text-decoration="underline">⚙ Setup API Credentials</text>
+    </g>
+
+    <!-- Label -->
+    <text x="250" y="540" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="18" font-weight="600" fill="#f6821f">Step 2: Pick Your Worker</text>
+  </g>
+
+  <!-- Arrow -->
+  <g transform="translate(1360, 430)">
+    <line x1="0" y1="0" x2="80" y2="0" stroke="#f6821f" stroke-width="3" stroke-linecap="round"/>
+    <polygon points="80,0 65,-10 65,10" fill="#f6821f"/>
+  </g>
+
+  <!-- Result key (right) -->
+  <g transform="translate(1500, 280)">
+    <rect width="240" height="240" rx="28" fill="#0d1117" stroke="#2d2d44" stroke-width="2"/>
+    <rect x="16" y="14" width="208" height="10" rx="5" fill="#4ade80"/>
+    <text x="120" y="86" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#9ca3af">api-worker</text>
+    <text x="120" y="138" text-anchor="middle" font-family="Arial, sans-serif" font-size="36" font-weight="700" fill="#ffffff">12.4K</text>
+    <text x="120" y="175" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" fill="#9ca3af">Requests · 24h</text>
+
+    <!-- Label -->
+    <text x="120" y="310" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="18" font-weight="600" fill="#f6821f">Step 3: Done!</text>
+  </g>
+
+  <!-- Bottom note -->
+  <text x="960" y="900" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="18" fill="#9ca3af">Workers and Gateways auto-populate from your account — no manual ID entry needed</text>
+</svg>

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 288 288" width="288" height="288">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#0d1117"/>
+    </linearGradient>
+    <linearGradient id="orangeGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f6821f"/>
+      <stop offset="100%" stop-color="#fbad41"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="288" height="288" rx="40" fill="url(#bgGrad)"/>
+
+  <!-- Subtle border -->
+  <rect x="2" y="2" width="284" height="284" rx="39" fill="none" stroke="#2d2d44" stroke-width="2"/>
+
+  <!-- 2x2 mini key grid representing 4 actions -->
+  <g transform="translate(144, 115)" filter="url(#glow)">
+    <!-- Top-left key: Status (green accent bar) -->
+    <g transform="translate(-52, -52)">
+      <rect width="46" height="46" rx="8" fill="#161b22" stroke="#2d2d44" stroke-width="1"/>
+      <rect x="5" y="4" width="36" height="4" rx="2" fill="#4ade80"/>
+      <rect x="10" y="16" width="26" height="3" rx="1.5" fill="#ffffff" opacity="0.7"/>
+      <rect x="14" y="24" width="18" height="3" rx="1.5" fill="#9ca3af" opacity="0.5"/>
+    </g>
+    <!-- Top-right key: Deployment (blue accent bar) -->
+    <g transform="translate(6, -52)">
+      <rect width="46" height="46" rx="8" fill="#161b22" stroke="#2d2d44" stroke-width="1"/>
+      <rect x="5" y="4" width="36" height="4" rx="2" fill="#60a5fa"/>
+      <rect x="10" y="16" width="26" height="3" rx="1.5" fill="#ffffff" opacity="0.7"/>
+      <rect x="14" y="24" width="18" height="3" rx="1.5" fill="#9ca3af" opacity="0.5"/>
+    </g>
+    <!-- Bottom-left key: AI Gateway (orange accent bar) -->
+    <g transform="translate(-52, 6)">
+      <rect width="46" height="46" rx="8" fill="#161b22" stroke="#2d2d44" stroke-width="1"/>
+      <rect x="5" y="4" width="36" height="4" rx="2" fill="#fb923c"/>
+      <rect x="10" y="16" width="26" height="3" rx="1.5" fill="#ffffff" opacity="0.7"/>
+      <rect x="14" y="24" width="18" height="3" rx="1.5" fill="#9ca3af" opacity="0.5"/>
+    </g>
+    <!-- Bottom-right key: Analytics (amber accent bar) -->
+    <g transform="translate(6, 6)">
+      <rect width="46" height="46" rx="8" fill="#161b22" stroke="#2d2d44" stroke-width="1"/>
+      <rect x="5" y="4" width="36" height="4" rx="2" fill="#fbbf24"/>
+      <rect x="10" y="16" width="26" height="3" rx="1.5" fill="#ffffff" opacity="0.7"/>
+      <rect x="14" y="24" width="18" height="3" rx="1.5" fill="#9ca3af" opacity="0.5"/>
+    </g>
+  </g>
+
+  <!-- Orange accent line -->
+  <rect x="84" y="190" width="120" height="3" rx="1.5" fill="url(#orangeGrad)" opacity="0.8"/>
+
+  <!-- "CLOUDFLARE" text -->
+  <text x="144" y="224" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="700" fill="#ffffff" opacity="0.9" letter-spacing="2">CLOUDFLARE</text>
+  <!-- "UTILITIES" text -->
+  <text x="144" y="256" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="600" fill="#9ca3af" opacity="0.8" letter-spacing="3">UTILITIES</text>
+</svg>

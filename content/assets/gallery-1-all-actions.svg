@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 960" width="1920" height="960">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="accentLine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f6821f" stop-opacity="0"/>
+      <stop offset="30%" stop-color="#f6821f"/>
+      <stop offset="70%" stop-color="#fbad41"/>
+      <stop offset="100%" stop-color="#fbad41" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1920" height="960" fill="url(#bgGrad)"/>
+
+  <!-- Title -->
+  <text x="960" y="80" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="42" font-weight="700" fill="#ffffff">All 4 Actions at a Glance</text>
+  <text x="960" y="120" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="22" fill="#9ca3af">Monitor your entire Cloudflare stack from your Stream Deck</text>
+  <rect x="660" y="140" width="600" height="3" rx="1.5" fill="url(#accentLine)"/>
+
+  <!-- Stream Deck body mockup -->
+  <g transform="translate(460, 200)">
+    <!-- Device frame -->
+    <rect x="-40" y="-30" width="1080" height="600" rx="40" fill="#1a1a2e" stroke="#2d2d44" stroke-width="2"/>
+    <rect x="-20" y="-10" width="1040" height="560" rx="30" fill="#111827"/>
+
+    <!-- Row of 5 keys (realistic 3x5 grid, showing middle row) -->
+    <!-- Key 1: Cloudflare Status -->
+    <g transform="translate(30, 170)">
+      <rect width="170" height="170" rx="18" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="12" y="10" width="146" height="7" rx="3.5" fill="#4ade80"/>
+      <text x="85" y="62" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#9ca3af">Cloudflare</text>
+      <text x="85" y="100" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff">Operational</text>
+      <text x="85" y="130" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#9ca3af">All Systems</text>
+    </g>
+
+    <!-- Key 2: Worker Deployment -->
+    <g transform="translate(220, 170)">
+      <rect width="170" height="170" rx="18" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="12" y="10" width="146" height="7" rx="3.5" fill="#4ade80"/>
+      <text x="85" y="62" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#9ca3af">auth-worker</text>
+      <text x="85" y="100" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff">Live</text>
+      <text x="85" y="130" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#9ca3af">5m ago</text>
+    </g>
+
+    <!-- Key 3: AI Gateway -->
+    <g transform="translate(410, 170)">
+      <rect width="170" height="170" rx="18" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="12" y="10" width="146" height="7" rx="3.5" fill="#60a5fa"/>
+      <text x="85" y="62" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#9ca3af">prod-gw</text>
+      <text x="85" y="100" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff">48.2K</text>
+      <text x="85" y="130" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#9ca3af">Requests · 24h</text>
+    </g>
+
+    <!-- Key 4: Worker Analytics -->
+    <g transform="translate(600, 170)">
+      <rect width="170" height="170" rx="18" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="12" y="10" width="146" height="7" rx="3.5" fill="#4ade80"/>
+      <text x="85" y="62" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#9ca3af">api-worker</text>
+      <text x="85" y="100" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff">99.8%</text>
+      <text x="85" y="130" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#9ca3af">Success · 24h</text>
+    </g>
+
+    <!-- Key 5: Another Worker Deployment (Gradual) -->
+    <g transform="translate(790, 170)">
+      <rect width="170" height="170" rx="18" fill="#0d1117" stroke="#2d2d44" stroke-width="1.5"/>
+      <rect x="12" y="10" width="146" height="7" rx="3.5" fill="#fbbf24"/>
+      <text x="85" y="62" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#9ca3af">edge-proxy</text>
+      <text x="85" y="100" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff">Gradual</text>
+      <text x="85" y="130" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#9ca3af">50% / 50%</text>
+    </g>
+  </g>
+
+  <!-- Labels below the device -->
+  <g transform="translate(460, 850)">
+    <text x="115" y="0" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="16" font-weight="600" fill="#4ade80">Status</text>
+    <text x="305" y="0" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="16" font-weight="600" fill="#4ade80">Deployment</text>
+    <text x="495" y="0" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="16" font-weight="600" fill="#60a5fa">AI Gateway</text>
+    <text x="685" y="0" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="16" font-weight="600" fill="#4ade80">Analytics</text>
+    <text x="875" y="0" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="16" font-weight="600" fill="#fbbf24">Rollout</text>
+  </g>
+</svg>

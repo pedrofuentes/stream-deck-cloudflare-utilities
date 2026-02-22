@@ -11,6 +11,7 @@ This file covers project rules, architecture, and workflow. Detailed guides live
 | **`.github/UI-DESIGN-GUIDE.md`** | Any work involving key display, SVG rendering, colors, layout, marquee, icons, Property Inspector, or visual changes. Contains all hardware-tested UX patterns, the color palette, font specs, and a log of failed design attempts. |
 | **`.github/TESTING-PROTOCOL.md`** | Any work involving writing tests, mocking patterns, timer testing, coverage, or pre-release validation. Contains recipes, pitfalls, and the mandatory manual device testing protocol. |
 | **`SKILLS.md`** | Deep reference: raw research data, SDK component catalog, device specs, and the complete design decisions log. Read before making novel UI changes. |
+| **`content/CONTENT-GUIDE.md`** | Any work involving releases, version bumps, or Elgato Marketplace updates. Contains asset specs, release notes templates, description management, and the marketplace upload procedure. |
 
 ---
 
@@ -55,6 +56,9 @@ npm run lint          # TypeScript type-check (no emit)
 npm run validate      # Validate plugin with Stream Deck CLI
 npm run validate:consistency  # Check actions/manifest/PI/icons/tests/docs are in sync
 npm run pack          # Full build + package (runs tests + lint + consistency first via prepack)
+
+# Content (Elgato Marketplace)
+npm run content:assets  # Regenerate PNG assets from SVG sources in content/assets/
 ```
 
 ### 4. Release Packaging
@@ -133,6 +137,15 @@ After every release, update `ROADMAP.md`:
 3. If new items were shipped that aren't in the table, add them as a new row.
 4. These changes should be included in the version bump commit (before tagging), not as a separate commit.
 
+#### Post-release — Update Elgato Marketplace Content (MANDATORY)
+After every release, update the marketplace content. **See `content/CONTENT-GUIDE.md`** for full details.
+1. Write release notes in `content/release-notes.md`.
+2. Review `content/description.md` — update if features changed.
+3. Update gallery SVGs in `content/assets/` if key display changed.
+4. Run `npm run content:assets` to regenerate PNGs from SVGs.
+5. Commit content changes with the version bump.
+6. After GitHub Release: copy release notes and upload new assets to the Elgato Marketplace developer portal.
+
 ---
 
 ## Architecture
@@ -147,6 +160,12 @@ src/
 
 scripts/              # Build & validation scripts
 └── validate-consistency.ts  # Plugin consistency validator
+
+content/              # Elgato Marketplace content (see content/CONTENT-GUIDE.md)
+├── CONTENT-GUIDE.md  # Agent instructions for marketplace content
+├── description.md    # Plugin description (4000 char limit)
+├── release-notes.md  # Release notes per version (1500 char limit each)
+└── assets/           # SVG sources + generated PNGs for marketplace
 
 tests/                # Mirrors src/ structure
 ├── actions/
