@@ -60,7 +60,13 @@ This runs `prepack` (test + lint), then `build`, then `streamdeck pack` to produ
 #### Manual device test (user performs this)
 6. **ASK the user to test on their physical Stream Deck.** The agent must explicitly prompt:
    > "Before I tag and release, please test the plugin on your Stream Deck and confirm everything works. Specifically, please verify: [list what changed]."
-7. **Wait for explicit user confirmation** before proceeding to version bump / tag / push / release.
+7. **Provide a numbered, step-by-step manual test flow** covering every new feature or bug fix in the release. Each step must be concrete and actionable (e.g., "Add Worker Analytics action to a key → open PI → select a worker → verify the key shows request count"). Include:
+   - **Setup steps** (add action to key, configure PI settings)
+   - **Happy-path verification** (expected display, colors, values)
+   - **Interaction tests** (key press behavior, metric cycling, dropdown changes)
+   - **Edge-case checks** (long names for marquee, missing credentials, empty data)
+   - **Regression checks** for existing actions that may be affected by the change
+8. **Wait for explicit user confirmation** before proceeding to version bump / tag / push / release.
 
 #### Why the CLI alone is NOT enough
 - `streamdeck validate` only checks the manifest JSON schema — it does **not** test runtime behavior, UI rendering, API calls, or key display.
