@@ -16,6 +16,7 @@ vi.mock("@elgato/streamdeck", () => ({
   default: {
     logger: {
       error: vi.fn(),
+      info: vi.fn(),
       setLevel: vi.fn(),
     },
     actions: {
@@ -488,6 +489,320 @@ describe("CloudflareStatus", () => {
       const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
       expect(svg).toContain("Partial");
       expect(svg).toContain(STATUS_COLORS.amber);
+
+      vi.useRealTimers();
+    });
+  });
+
+  describe("error backoff", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    });
+
+    it("should skip polls after first error (skip 1)", async () => {
+      vi.useFakeTimers();
+
+      const mockClient = {
+        getSystemStatus: vi
+          .fn()
+          .mockRejectedValueOnce(new Error("403"))
+          .mockResolvedValue({ indicator: "none", description: "OK" }),
+      } as unknown as CloudflareApiClient;
+
+      const action = new CloudflareStatus(mockClient);
+      const ev = makeMockEvent({ refreshIntervalSeconds: 60 });
+
+      // Initial call — fails (consecutiveErrors = 1, skipCount = 1)
+      await action.onWillAppear(ev);
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(1);
+
+      // First tick — skipped (skipCount 1 → 0)
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(1); // still 1
+
+      // Second tick — skipCount is 0, makes the call (succeeds)
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(2);
+
+      vi.useRealTimers();
+    });
+
+    it("should increase backoff exponentially on consecutive errors", async () => {
+      vi.useFakeTimers();
+
+      const mockClient = {
+        getSystemStatus: vi.fn().mockRejectedValue(new Error("403")),
+      } as unknown as CloudflareApiClient;
+
+      const action = new CloudflareStatus(mockClient);
+      const ev = makeMockEvent({ refreshIntervalSeconds: 10 });
+
+      // Initial call — error #1, skipCount = 1
+      await action.onWillAppear(ev);
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(1);
+
+      // Skip 1, then retry — error #2, skipCount = 3
+      await vi.advanceTimersByTimeAsync(10_000); // skip
+      await vi.advanceTimersByTimeAsync(10_000); // call
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(2);
+
+      // Skip 3, then retry — error #3, skipCount = 7
+      await vi.advanceTimersByTimeAsync(10_000); // skip
+      await vi.advanceTimersByTimeAsync(10_000); // skip
+      await vi.advanceTimersByTimeAsync(10_000); // skip
+      await vi.advanceTimersByTimeAsync(10_000); // call
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(3);
+
+      vi.useRealTimers();
+    });
+
+    it("should cap backoff at MAX_BACKOFF_EXPONENT (32x)", async () => {
+      vi.useFakeTimers();
+
+      let callCount = 0;
+      const mockClient = {
+        getSystemStatus: vi.fn().mockImplementation(() => {
+          callCount++;
+          return Promise.reject(new Error("403"));
+        }),
+      } as unknown as CloudflareApiClient;
+
+      const action = new CloudflareStatus(mockClient);
+      const ev = makeMockEvent({ refreshIntervalSeconds: 1 });
+
+      // Initial call — error #1, skip=1
+      await action.onWillAppear(ev);
+      expect(callCount).toBe(1);
+
+      // Error #2: skip 1, call → skip=3
+      await vi.advanceTimersByTimeAsync(1_000); // skip
+      await vi.advanceTimersByTimeAsync(1_000); // call
+      expect(callCount).toBe(2);
+
+      // Error #3: skip 3, call → skip=7
+      for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(1_000); // call
+      expect(callCount).toBe(3);
+
+      // Error #4: skip 7, call → skip=15
+      for (let i = 0; i < 7; i++) await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(1_000); // call
+      expect(callCount).toBe(4);
+
+      // Error #5: skip 15, call → skip=31 (capped)
+      for (let i = 0; i < 15; i++) await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(1_000); // call
+      expect(callCount).toBe(5);
+
+      // Error #6: skip should still be 31 (capped at 2^5-1)
+      for (let i = 0; i < 31; i++) await vi.advanceTimersByTimeAsync(1_000);
+      expect(callCount).toBe(5); // still 5 during skips
+
+      await vi.advanceTimersByTimeAsync(1_000); // call
+      expect(callCount).toBe(6);
+
+      // Error #7: skip should still be 31 (doesn't grow beyond cap)
+      for (let i = 0; i < 31; i++) await vi.advanceTimersByTimeAsync(1_000);
+      expect(callCount).toBe(6); // still 6 during skips
+
+      await vi.advanceTimersByTimeAsync(1_000); // call
+      expect(callCount).toBe(7);
+
+      vi.useRealTimers();
+    });
+
+    it("should reset backoff on successful fetch", async () => {
+      vi.useFakeTimers();
+
+      const mockClient = {
+        getSystemStatus: vi
+          .fn()
+          .mockRejectedValueOnce(new Error("403"))  // error #1
+          .mockRejectedValueOnce(new Error("403"))  // error #2
+          .mockResolvedValueOnce({ indicator: "none", description: "OK" }) // success
+          .mockRejectedValueOnce(new Error("403"))  // error again — should be #1 not #3
+          .mockResolvedValue({ indicator: "none", description: "OK" }),
+      } as unknown as CloudflareApiClient;
+
+      const action = new CloudflareStatus(mockClient);
+      const ev = makeMockEvent({ refreshIntervalSeconds: 10 });
+
+      // Initial: error #1, skip=1
+      await action.onWillAppear(ev);
+
+      // Skip 1, retry: error #2, skip=3
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(2);
+
+      // Skip 3, retry: success → reset backoff
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(3);
+
+      // Next tick should call immediately (skip=0 after reset)
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(4); // error again, but skip=1 (reset to #1)
+
+      // Only skip 1 (not 7 which would be if it was error #3)
+      await vi.advanceTimersByTimeAsync(10_000); // skip
+      await vi.advanceTimersByTimeAsync(10_000); // call
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(5);
+
+      vi.useRealTimers();
+    });
+
+    it("should reset backoff on key press", async () => {
+      vi.useFakeTimers();
+
+      const mockClient = {
+        getSystemStatus: vi
+          .fn()
+          .mockRejectedValueOnce(new Error("403"))   // initial error
+          .mockRejectedValueOnce(new Error("403"))   // key press error
+          .mockResolvedValue({ indicator: "none", description: "OK" }),
+      } as unknown as CloudflareApiClient;
+
+      const action = new CloudflareStatus(mockClient);
+      const ev = makeMockEvent({ refreshIntervalSeconds: 10 });
+
+      // Initial: error #1, skip=1
+      await action.onWillAppear(ev);
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(1);
+
+      // Key press resets backoff and fetches immediately
+      await action.onKeyDown(ev);
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(2);
+
+      // Even though key press errored, skip should be 1 (reset before fetch)
+      // ... but the fetch itself errored, so consecutiveErrors=1, skip=1
+      // Next tick: skip
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(2);
+
+      // Tick after: call succeeds
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(3);
+
+      vi.useRealTimers();
+    });
+  });
+
+  describe("marquee scrolling", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    });
+
+    it("should not start marquee for short component names", async () => {
+      vi.useFakeTimers();
+
+      const COMPONENTS: CloudflareComponent[] = [
+        { id: "dns-1", name: "DNS", status: "operational", description: null },
+      ];
+
+      const mockClient = {
+        getComponents: vi.fn().mockResolvedValue(COMPONENTS),
+      } as unknown as CloudflareApiClient;
+
+      const action = new CloudflareStatus(mockClient);
+      const ev = makeMockEvent({ componentId: "dns-1", componentName: "DNS" });
+
+      await action.onWillAppear(ev);
+
+      // Advance past marquee interval — no marquee tick should re-render
+      const callCount = ev.action.setImage.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(2000);
+      // setImage should not be called again (no marquee animation)
+      // Only the refresh interval would call, but the marquee tick is what matters
+      // The component name "DNS" is 3 chars, well under 10
+      expect(ev.action.setImage.mock.calls.length).toBe(callCount);
+
+      vi.useRealTimers();
+    });
+
+    it("should start marquee for long component names", async () => {
+      vi.useFakeTimers();
+
+      const COMPONENTS: CloudflareComponent[] = [
+        { id: "auth-1", name: "Access Authentication & SSO", status: "operational", description: null },
+      ];
+
+      const mockClient = {
+        getComponents: vi.fn().mockResolvedValue(COMPONENTS),
+      } as unknown as CloudflareApiClient;
+
+      const action = new CloudflareStatus(mockClient);
+      const ev = makeMockEvent({ componentId: "auth-1", componentName: "Access Authentication & SSO" });
+
+      await action.onWillAppear(ev);
+      const initialCalls = ev.action.setImage.mock.calls.length;
+
+      // Advance past the marquee pause ticks (3 * 500ms) and into scrolling
+      await vi.advanceTimersByTimeAsync(3000);
+
+      // Marquee should have re-rendered the key multiple times
+      expect(ev.action.setImage.mock.calls.length).toBeGreaterThan(initialCalls);
+
+      // The re-rendered SVG should contain scrolled text (not the full name)
+      const lastCall = ev.action.setImage.mock.calls[ev.action.setImage.mock.calls.length - 1][0];
+      const svg = decodeSvg(lastCall);
+      // Should contain the status and accent bar color
+      expect(svg).toContain(STATUS_COLORS.green);
+      expect(svg).toContain("OK");
+
+      vi.useRealTimers();
+    });
+
+    it("should not start marquee in overall status mode (Cloudflare is ≤10 chars)", async () => {
+      vi.useFakeTimers();
+
+      const mockClient = {
+        getSystemStatus: vi.fn().mockResolvedValue({
+          indicator: "none",
+          description: "All Systems Operational",
+        }),
+      } as unknown as CloudflareApiClient;
+
+      const action = new CloudflareStatus(mockClient);
+      const ev = makeMockEvent({});
+
+      await action.onWillAppear(ev);
+      const initialCalls = ev.action.setImage.mock.calls.length;
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      // No marquee ticks — "Cloudflare" is exactly 10 chars
+      expect(ev.action.setImage.mock.calls.length).toBe(initialCalls);
+
+      vi.useRealTimers();
+    });
+
+    it("should stop marquee when action disappears", async () => {
+      vi.useFakeTimers();
+
+      const COMPONENTS: CloudflareComponent[] = [
+        { id: "auth-1", name: "Access Authentication & SSO", status: "operational", description: null },
+      ];
+
+      const mockClient = {
+        getComponents: vi.fn().mockResolvedValue(COMPONENTS),
+      } as unknown as CloudflareApiClient;
+
+      const action = new CloudflareStatus(mockClient);
+      const ev = makeMockEvent({ componentId: "auth-1", componentName: "Access Authentication & SSO" });
+
+      await action.onWillAppear(ev);
+      action.onWillDisappear();
+
+      const callCount = ev.action.setImage.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(3000);
+
+      // No more re-renders after disappear
+      expect(ev.action.setImage.mock.calls.length).toBe(callCount);
 
       vi.useRealTimers();
     });

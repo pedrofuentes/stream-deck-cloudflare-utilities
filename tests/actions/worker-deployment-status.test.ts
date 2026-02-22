@@ -960,4 +960,101 @@ describe("WorkerDeploymentStatus", () => {
       vi.useRealTimers();
     });
   });
+
+  describe("marquee scrolling", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    });
+
+    it("should not start marquee for short worker names", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2025-01-15T12:00:00Z"));
+
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: "2025-01-15T10:00:00Z",
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      const ev = makeMockEvent({ workerName: "my-api", refreshIntervalSeconds: 60 });
+
+      await action.onWillAppear(ev);
+      const initialCalls = ev.action.setImage.mock.calls.length;
+
+      // Advance past marquee interval — no marquee ticks expected
+      await vi.advanceTimersByTimeAsync(3000);
+
+      // "my-api" is 6 chars, no marquee needed.
+      // Only the display interval should tick (for seconds counter), not marquee.
+      // The key shouldn't get extra marquee renders
+      const svg = decodeSvg(ev.action.setImage.mock.calls[initialCalls - 1][0]);
+      expect(svg).toContain("my-api"); // full name, not truncated
+
+      vi.useRealTimers();
+    });
+
+    it("should start marquee for long worker names", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2025-01-15T12:00:00Z"));
+
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: "2025-01-15T10:00:00Z",
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      const ev = makeMockEvent({
+        workerName: "my-super-long-worker-name",
+        refreshIntervalSeconds: 60,
+      });
+
+      await action.onWillAppear(ev);
+      const initialCalls = ev.action.setImage.mock.calls.length;
+
+      // Advance past marquee pause ticks and into scrolling
+      await vi.advanceTimersByTimeAsync(3000);
+
+      // Marquee should have re-rendered via the 500ms interval
+      expect(ev.action.setImage.mock.calls.length).toBeGreaterThan(initialCalls);
+
+      vi.useRealTimers();
+    });
+
+    it("should stop marquee when action disappears", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2025-01-15T12:00:00Z"));
+
+      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
+        isLive: true,
+        isGradual: false,
+        createdOn: "2025-01-15T10:00:00Z",
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+
+      const ev = makeMockEvent({
+        workerName: "my-super-long-worker-name",
+        refreshIntervalSeconds: 60,
+      });
+
+      await action.onWillAppear(ev);
+      action.onWillDisappear(ev);
+
+      const callCount = ev.action.setImage.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(3000);
+
+      // No more re-renders after disappear
+      expect(ev.action.setImage.mock.calls.length).toBe(callCount);
+
+      vi.useRealTimers();
+    });
+  });
 });

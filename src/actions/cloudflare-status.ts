@@ -19,6 +19,7 @@ import streamDeck, {
 
 import { CloudflareApiClient } from "../services/cloudflare-api-client";
 import { renderKeyImage, STATUS_COLORS } from "../services/key-image-renderer";
+import { MarqueeController } from "../services/marquee-controller";
 
 /**
  * Cloudflare Status action - displays the current Cloudflare system status
@@ -28,6 +29,31 @@ import { renderKeyImage, STATUS_COLORS } from "../services/key-image-renderer";
 export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> {
   private apiClient: CloudflareApiClient;
   private refreshInterval: ReturnType<typeof setInterval> | null = null;
+
+  /** Consecutive error count for exponential backoff */
+  private consecutiveErrors = 0;
+  /** Maximum backoff multiplier (caps at 2^5 = 32x the base interval) */
+  private static readonly MAX_BACKOFF_EXPONENT = 5;
+  /** Number of polls to skip (set by backoff logic) */
+  private skipCount = 0;
+
+  /** Marquee tick interval in milliseconds. */
+  private static readonly MARQUEE_INTERVAL_MS = 500;
+
+  /** Marquee controller for scrolling long component names. */
+  private marquee = new MarqueeController(10);
+
+  /** Interval handle for the marquee animation timer. */
+  private marqueeInterval: ReturnType<typeof setInterval> | null = null;
+
+  /** Stored event reference for marquee re-rendering. */
+  private lastEvent: WillAppearEvent<CloudflareStatusSettings>
+    | KeyDownEvent<CloudflareStatusSettings>
+    | DidReceiveSettingsEvent<CloudflareStatusSettings>
+    | null = null;
+
+  /** Last rendered image parameters for marquee re-rendering. */
+  private lastRenderParams: { line2: string; statusColor: string } | null = null;
 
   constructor(apiClient?: CloudflareApiClient) {
     super();
@@ -45,8 +71,12 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
     // Fetch status immediately
     await this.updateStatus(ev);
 
-    // Set up periodic refresh
+    // Set up periodic refresh (with backoff-aware tick)
     this.refreshInterval = setInterval(async () => {
+      if (this.skipCount > 0) {
+        this.skipCount--;
+        return;
+      }
       await this.updateStatus(ev);
     }, refreshIntervalMs);
   }
@@ -60,6 +90,10 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
       clearInterval(this.refreshInterval);
       this.refreshInterval = null;
     }
+    this.stopMarqueeTimer();
+    this.marquee.setText("");
+    this.lastEvent = null;
+    this.lastRenderParams = null;
   }
 
   /**
@@ -81,16 +115,23 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
     // Fetch immediately with new settings
     await this.updateStatus(ev);
 
-    // Restart periodic refresh
+    // Restart periodic refresh (with backoff-aware tick)
     this.refreshInterval = setInterval(async () => {
+      if (this.skipCount > 0) {
+        this.skipCount--;
+        return;
+      }
       await this.updateStatus(ev);
     }, refreshIntervalMs);
   }
 
   /**
    * Called when the key is pressed. Triggers an immediate status refresh.
+   * Resets backoff so the user can force a retry after errors.
    */
   override async onKeyDown(ev: KeyDownEvent<CloudflareStatusSettings>): Promise<void> {
+    this.consecutiveErrors = 0;
+    this.skipCount = 0;
     await this.updateStatus(ev);
   }
 
@@ -104,8 +145,15 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
       | KeyDownEvent<CloudflareStatusSettings>
       | DidReceiveSettingsEvent<CloudflareStatusSettings>
   ): Promise<void> {
+    this.lastEvent = ev;
     const settings = ev.payload.settings;
     const componentId = settings.componentId;
+
+    // Set marquee text based on mode
+    const rawLabel = componentId
+      ? (settings.componentName ?? "Component")
+      : "Cloudflare";
+    this.marquee.setText(rawLabel);
 
     try {
       if (componentId) {
@@ -113,32 +161,62 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
         const components = await this.apiClient.getComponents();
         const component = components.find((c) => c.id === componentId);
         if (!component) {
+          this.lastRenderParams = { line2: "N/A", statusColor: STATUS_COLORS.gray };
           await ev.action.setImage(
             renderKeyImage({
-              line1: settings.componentName ?? "Component",
+              line1: this.marquee.needsAnimation() ? this.marquee.getCurrentText() : rawLabel,
               line2: "N/A",
               statusColor: STATUS_COLORS.gray,
             })
           );
+          this.startMarqueeIfNeeded();
           return;
         }
         const label = settings.componentName ?? component.name;
-        await ev.action.setImage(this.renderComponentImage(label, component.status));
+        this.marquee.setText(label);
+        const { label: statusLabel, color } = CloudflareStatus.mapComponentStatus(component.status);
+        this.lastRenderParams = { line2: statusLabel, statusColor: color };
+        await ev.action.setImage(
+          renderKeyImage({
+            line1: this.marquee.needsAnimation() ? this.marquee.getCurrentText() : label,
+            line2: statusLabel,
+            statusColor: color,
+          })
+        );
+        this.startMarqueeIfNeeded();
       } else {
         // Overall status mode (original behavior)
         const status = await this.apiClient.getSystemStatus();
-        await ev.action.setImage(this.renderStatusImage(status.indicator));
+        const image = this.renderStatusImage(status.indicator);
+        this.lastRenderParams = null; // renderStatusImage uses "Cloudflare" which is ≤10 chars
+        this.stopMarqueeTimer();
+        await ev.action.setImage(image);
       }
+      // Success — reset backoff
+      this.consecutiveErrors = 0;
+      this.skipCount = 0;
     } catch (error) {
       streamDeck.logger.error("Failed to fetch Cloudflare status:", error);
-      const label = componentId ? (settings.componentName ?? "Component") : "Cloudflare";
+
+      // Exponential backoff: skip 2^n - 1 polls before retrying
+      this.consecutiveErrors = Math.min(
+        this.consecutiveErrors + 1,
+        CloudflareStatus.MAX_BACKOFF_EXPONENT
+      );
+      this.skipCount = Math.pow(2, this.consecutiveErrors) - 1;
+      streamDeck.logger.info(
+        `Backoff: skipping next ${this.skipCount} poll(s) after ${this.consecutiveErrors} consecutive error(s)`
+      );
+
+      this.lastRenderParams = { line2: "ERR", statusColor: STATUS_COLORS.red };
       await ev.action.setImage(
         renderKeyImage({
-          line1: label,
+          line1: this.marquee.needsAnimation() ? this.marquee.getCurrentText() : rawLabel,
           line2: "ERR",
           statusColor: STATUS_COLORS.red,
         })
       );
+      this.startMarqueeIfNeeded();
     }
   }
 
@@ -213,6 +291,47 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
       default:
         return { label: "N/A", color: STATUS_COLORS.gray };
     }
+  }
+
+  /**
+   * Starts the marquee animation interval if the component name is too
+   * long for the key display.
+   */
+  private startMarqueeIfNeeded(): void {
+    if (this.marquee.needsAnimation() && this.lastRenderParams) {
+      if (!this.marqueeInterval) {
+        this.marqueeInterval = setInterval(() => this.onMarqueeTick(), CloudflareStatus.MARQUEE_INTERVAL_MS);
+      }
+    } else {
+      this.stopMarqueeTimer();
+    }
+  }
+
+  /**
+   * Stops the marquee animation interval.
+   */
+  private stopMarqueeTimer(): void {
+    if (this.marqueeInterval) {
+      clearInterval(this.marqueeInterval);
+      this.marqueeInterval = null;
+    }
+  }
+
+  /**
+   * Marquee tick handler — advances the scroll position and re-renders
+   * the key image if the visible text changed.
+   */
+  private async onMarqueeTick(): Promise<void> {
+    const changed = this.marquee.tick();
+    if (!changed || !this.lastEvent || !this.lastRenderParams) return;
+
+    await this.lastEvent.action.setImage(
+      renderKeyImage({
+        line1: this.marquee.getCurrentText(),
+        line2: this.lastRenderParams.line2,
+        statusColor: this.lastRenderParams.statusColor,
+      })
+    );
   }
 }
 

@@ -20,6 +20,7 @@ import streamDeck, {
 import { CloudflareWorkersApi, formatTimeAgo, truncateWorkerName } from "../services/cloudflare-workers-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, STATUS_COLORS } from "../services/key-image-renderer";
+import { MarqueeController } from "../services/marquee-controller";
 import type { DeploymentStatus } from "../types/cloudflare-workers";
 
 /**
@@ -80,6 +81,15 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   /** Back-off interval after an error */
   private static readonly ERROR_BACKOFF_MS = 30 * 1000;
 
+  /** Marquee tick interval in milliseconds. */
+  private static readonly MARQUEE_INTERVAL_MS = 500;
+
+  /** Marquee controller for scrolling long worker names. */
+  private marquee = new MarqueeController(10);
+
+  /** Interval handle for the marquee animation timer. */
+  private marqueeInterval: ReturnType<typeof setInterval> | null = null;
+
   /**
    * Called when the action appears on the Stream Deck.
    * Validates settings, creates the API client, and starts periodic refresh.
@@ -97,6 +107,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     }
 
     this.apiClient = new CloudflareWorkersApi(global.apiToken!, global.accountId!);
+    this.marquee.setText(settings.workerName ?? "");
 
     // Fetch immediately, then schedule adaptive polling
     await this.updateStatus(ev);
@@ -113,6 +124,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     // Tear down existing refresh cycle
     this.clearRefreshTimeout();
     this.clearDisplayInterval();
+    this.stopMarqueeTimer();
     this.apiClient = null;
     this.lastState = null;
     this.lastStatus = null;
@@ -127,6 +139,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     }
 
     this.apiClient = new CloudflareWorkersApi(global.apiToken!, global.accountId!);
+    this.marquee.setText(settings.workerName ?? "");
 
     // Fetch immediately with new settings, then schedule adaptive polling
     await this.updateStatus(ev);
@@ -140,6 +153,8 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   override onWillDisappear(_ev: WillDisappearEvent<WorkerDeploymentSettings>): void {
     this.clearRefreshTimeout();
     this.clearDisplayInterval();
+    this.stopMarqueeTimer();
+    this.marquee.setText("");
     this.apiClient = null;
     this.lastState = null;
     this.lastStatus = null;
@@ -187,6 +202,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
 
       if (!status) {
         await ev.action.setImage(this.renderStatus("error", settings.workerName, "No deploys"));
+        this.startMarqueeIfNeeded();
         return;
       }
 
@@ -196,6 +212,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       this.lastWorkerName = settings.workerName ?? null;
       this.actionRef = ev.action as unknown as { setImage(image: string): Promise<void> };
       await ev.action.setImage(this.renderStatus(state, settings.workerName, undefined, status));
+      this.startMarqueeIfNeeded();
       this.startDisplayRefresh();
     } catch (error) {
       this.lastState = "error";
@@ -203,6 +220,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       this.clearDisplayInterval();
       streamDeck.logger.error(`Failed to fetch deployment status for "${settings.workerName}":`, error);
       await ev.action.setImage(this.renderStatus("error", settings.workerName));
+      this.startMarqueeIfNeeded();
     }
   }
 
@@ -239,9 +257,11 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     state: StatusState,
     workerName?: string,
     errorMessage?: string,
-    status?: DeploymentStatus
+    status?: DeploymentStatus,
+    displayName?: string,
   ): string {
-    const name = workerName ? truncateWorkerName(workerName) : "";
+    const name = displayName
+      ?? (workerName ? (this.marquee.needsAnimation() ? this.marquee.getCurrentText() : truncateWorkerName(workerName)) : "");
 
     switch (state) {
       case "error":
@@ -373,7 +393,8 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       }
 
       await this.actionRef.setImage(
-        this.renderStatus(state, this.lastWorkerName!, undefined, this.lastStatus)
+        this.renderStatus(state, this.lastWorkerName!, undefined, this.lastStatus,
+          this.marquee.needsAnimation() ? this.marquee.getCurrentText() : undefined)
       );
 
       // Stop ticking once we're past seconds display
@@ -414,6 +435,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       // Re-run the same flow as onDidReceiveSettings
       this.clearRefreshTimeout();
       this.clearDisplayInterval();
+      this.stopMarqueeTimer();
       this.apiClient = null;
       this.lastState = null;
       this.lastStatus = null;
@@ -429,9 +451,49 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       }
 
       this.apiClient = new CloudflareWorkersApi(global.apiToken!, global.accountId!);
+      this.marquee.setText(settings.workerName ?? "");
 
       await this.updateStatus(ev);
       this.scheduleRefresh(ev);
     });
+  }
+
+  /**
+   * Starts the marquee animation interval if the worker name is too
+   * long for the key display.
+   */
+  private startMarqueeIfNeeded(): void {
+    if (this.marquee.needsAnimation()) {
+      if (!this.marqueeInterval) {
+        this.marqueeInterval = setInterval(() => this.onMarqueeTick(), WorkerDeploymentStatus.MARQUEE_INTERVAL_MS);
+      }
+    } else {
+      this.stopMarqueeTimer();
+    }
+  }
+
+  /**
+   * Stops the marquee animation interval.
+   */
+  private stopMarqueeTimer(): void {
+    if (this.marqueeInterval) {
+      clearInterval(this.marqueeInterval);
+      this.marqueeInterval = null;
+    }
+  }
+
+  /**
+   * Marquee tick handler — advances the scroll position and re-renders
+   * the key image if the visible text changed.
+   */
+  private async onMarqueeTick(): Promise<void> {
+    const changed = this.marquee.tick();
+    if (!changed || !this.actionRef || !this.lastWorkerName) return;
+
+    const state = this.lastState ?? "live";
+    await this.actionRef.setImage(
+      this.renderStatus(state, this.lastWorkerName, undefined, this.lastStatus ?? undefined,
+        this.marquee.getCurrentText())
+    );
   }
 }
