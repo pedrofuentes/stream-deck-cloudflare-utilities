@@ -1,6 +1,6 @@
 {
   "name": "stream-deck-cloudflare-utilities",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Stream Deck plugin providing Cloudflare utilities and monitoring",
   "private": true,
   "main": "src/plugin.ts",
@@ -16,7 +16,7 @@
     "test:coverage": "vitest run --coverage",
     "lint": "tsc --noEmit",
     "validate": "streamdeck validate com.pedrofuentes.cloudflare-utilities.sdPlugin",
-    "pack": "npm run build:production && streamdeck pack com.pedrofuentes.cloudflare-utilities.sdPlugin --output dist",
+    "pack": "npm run build:production && streamdeck pack com.pedrofuentes.cloudflare-utilities.sdPlugin --output dist --force",
     "prepack": "npm run test && npm run lint",
     "streamdeck:link": "streamdeck link com.pedrofuentes.cloudflare-utilities.sdPlugin",
     "streamdeck:unlink": "streamdeck unlink com.pedrofuentes.cloudflare-utilities.sdPlugin",

@@ -1,8 +1,8 @@
 # Roadmap — Stream Deck Cloudflare Utilities
 
 > Created: February 20, 2026
-> Current version: 1.0.1
-> Current actions: 3 (Cloudflare Status, Worker Deployment Status, AI Gateway Metric)
+> Current version: 1.1.0
+> Current actions: 4 (Cloudflare Status, Worker Deployment Status, AI Gateway Metric, Worker Analytics)
 
 This document outlines potential new actions, enhancements, and improvements based on what the Cloudflare API surface supports with read-only tokens.
 
@@ -36,7 +36,7 @@ This document outlines potential new actions, enhancements, and improvements bas
 
 ## P0 — Quick Wins (Extend Existing)
 
-### 0.1 · Worker Analytics Action
+### ~~0.1 · Worker Analytics Action~~ ✅ Shipped in v1.1.0
 
 **What**: Show invocation count, error rate, CPU time, and duration for a selected Worker — similar to AI Gateway Metric but for Workers.
 
@@ -75,7 +75,7 @@ query {
 
 ---
 
-### 0.2 · Cloudflare Status — Component Drill-Down
+### ~~0.2 · Cloudflare Status — Component Drill-Down~~ ✅ Shipped in v1.1.0
 
 **What**: Allow the user to pick a specific Cloudflare component (CDN/Cache, DNS, Workers, Pages, etc.) instead of only showing the overall status.
 
@@ -89,7 +89,7 @@ query {
 
 ---
 
-### 0.3 · AI Gateway Metric — Error Rate Instead of Raw Count
+### ~~0.3 · AI Gateway Metric — Error Rate Instead of Raw Count~~ ✅ Shipped in v1.1.0
 
 **What**: Add an "Error Rate" metric (errors / requests × 100) to the cycle order.
 
@@ -101,7 +101,7 @@ query {
 
 ---
 
-### 0.4 · AI Gateway Metric — Cache Hit Rate
+### ~~0.4 · AI Gateway Metric — Cache Hit Rate~~ ✅ Shipped in v1.1.0
 
 **What**: Show cache hit ratio using `cachedTokensIn + cachedTokensOut` vs total tokens.
 
