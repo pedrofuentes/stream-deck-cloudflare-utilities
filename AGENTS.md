@@ -109,6 +109,13 @@ git push origin main --tags
 npm run pack  # Produces dist/*.streamDeckPlugin
 ```
 
+#### Post-release — Update Roadmap (MANDATORY)
+After every release, update `ROADMAP.md`:
+1. Update the `Current version` in the header.
+2. Strike-through the shipped version row in the **Recommended Rollout Order** table.
+3. If new items were shipped that aren't in the table, add them as a new row.
+4. Commit: `git add ROADMAP.md && git commit -m "docs(roadmap): update for vx.y.z" && git push origin main`
+
 ---
 
 ## Architecture
