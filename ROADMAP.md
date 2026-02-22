@@ -1,7 +1,7 @@
 # Roadmap — Stream Deck Cloudflare Utilities
 
 > Created: February 20, 2026
-> Current version: 1.1.2
+> Current version: 1.1.3
 > Current actions: 4 (Cloudflare Status, Worker Deployment Status, AI Gateway Metric, Worker Analytics)
 
 This document outlines potential new actions, enhancements, and improvements based on what the Cloudflare API surface supports with read-only tokens.
@@ -490,6 +490,7 @@ Based on value and effort:
 | ~~**v1.1**~~ | ~~0.1 (Worker Analytics), 0.2 (Component Drill-Down), 0.3 (Error Rate), 0.4 (Cache Hit Rate)~~ | ~~Enhance existing + Worker analytics~~ |
 | ~~**v1.1.1**~~ | ~~Shared PollingCoordinator refactor, FilterableSelect searchable dropdowns in all PIs, docs reorganized to .github/~~ | ~~Code quality + PI UX polish~~ |
 | ~~**v1.1.2**~~ | ~~Move plugin source assets to plugin/ and build output to release/, project restructuring~~ | ~~Directory restructuring~~ |
+| ~~**v1.1.3**~~ | ~~"Please Setup" display when API credentials are missing~~ | ~~First-run UX~~ |
 | **v1.2** | 3.2 (Token Validation), 3.5 (Long-Press URL), 1.1 (Pages Deployment) | UX polish + Pages |
 | **v1.3** | 1.3 (Zone Analytics), 1.2 (DNS Monitor), 2.4 (SSL Expiry) | Zone-level monitoring |
 | **v1.4** | 1.4 (R2 Metric), 1.5 (D1 Metric), 1.6 (KV Metric) | Storage & database monitoring |
