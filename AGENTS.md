@@ -339,37 +339,51 @@ API credentials (API Token, Account ID) are shared across all actions via Stream
 
 ---
 
-## Contributing Learnings Back to the Template
+## Template Collaboration Protocol
 
-This plugin was created from the **stream-deck-template**: https://github.com/pedrofuentes/stream-deck-template
+This plugin is part of the **stream-deck-template** knowledge-sharing ecosystem.
+All Stream Deck plugins share the same SDK, hardware constraints, and pitfalls.
+Learnings discovered here benefit every other plugin.
 
-The template is a shared knowledge hub for all Stream Deck plugins. As an agent, you should **proactively contribute new learnings** back to it after completing significant work.
+- **Template repo**: https://github.com/pedrofuentes/stream-deck-template
+- **This plugin's contributions**: `contributions/cloudflare-utilities.md` in the template repo
+- **Consolidated knowledge**: `LEARNINGS.md` in the template repo
 
-### Before Starting Major Work
+### Reading Knowledge From the Template
 
-Read `S:\Pedro\Projects\stream-deck-template\LEARNINGS.md` for the latest consolidated knowledge from all plugins (iCal, GitHub Utilities, Cloudflare Utilities, and any future plugins). This avoids re-discovering known pitfalls and ensures you benefit from solutions found in other projects.
+Before starting major work on a new feature, refactor, or release, fetch and read
+the latest `LEARNINGS.md` from the template:
 
-### When to Offer a Contribution
+```
+https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/LEARNINGS.md
+```
 
-- After solving a **non-obvious bug** or hardware quirk
-- After implementing a **reusable pattern** (polling, caching, UI, testing)
-- After discovering a **manifest or SDK constraint**
-- After a **release** (summarize what was learned)
-- When the session is **wrapping up** or the user asks "anything else?"
+This contains detailed, code-level patterns for:
+- SVG rendering compatibility and OLED-tested color palettes
+- Property Inspector patterns (popup windows, dropdown hydration, FilterableSelect, settings race conditions)
+- Architecture patterns (global settings pub/sub, service layer isolation, PollingCoordinator, resource managers)
+- Adaptive polling, rate limit handling, key-press cycling, short/long press detection
+- Marquee animations, compact number formatting, accent bar layout, viewport-aware dropdowns
+- Testing patterns (singleton store resets, fixture organization, SVG assertion helpers)
+- Build pipeline, validate:consistency script, release checklist, PI verification gate
+- Common mistakes table with 23+ entries
 
-### How to Contribute
+### Contributing Knowledge Back
 
-1. **Write** findings to `S:\Pedro\Projects\stream-deck-template\contributions\cloudflare-utilities.md` using the format defined in `COLLABORATION.md`.
-2. **Commit and push** (or open a PR) to https://github.com/pedrofuentes/stream-deck-template with a conventional commit:
-   ```
-   docs(cloudflare-utilities): add learnings about <topic>
-   ```
-3. Only add **NEW** learnings — read `LEARNINGS.md` first to avoid duplicating existing knowledge.
+After completing significant work, **proactively offer** to contribute new learnings
+to the template. This is expected — not optional.
 
-### Contribution Format
+**How:**
+1. Fetch the template's contribution file for this plugin:
+   `https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/contributions/cloudflare-utilities.md`
+2. Read it to understand what has already been contributed
+3. Write new findings using the format below
+4. Push to the template repo (clone it, or ask the user to switch workspaces)
+5. Commit with: `docs(cloudflare-utilities): add learnings about <topic>`
 
+**Contribution format:**
 ```markdown
-## [Category] — Short Title
+## [Category] — [Short Title]
 
 **Discovered in**: cloudflare-utilities
 **Date**: <date>
@@ -380,3 +394,34 @@ Read `S:\Pedro\Projects\stream-deck-template\LEARNINGS.md` for the latest consol
 **Code example** (if applicable)
 **Prevention**: How to avoid this in the future
 ```
+
+**When to offer a contribution:**
+- After solving a non-obvious bug or hardware quirk
+- After implementing a reusable pattern (polling, caching, UI component)
+- After discovering a manifest or SDK constraint
+- After a release (summarize what was learned)
+- After refactoring something that other plugins also have
+- When the session is wrapping up and the user asks "anything else?"
+
+**When NOT to contribute:**
+- Plugin-specific business logic (API response parsing unique to this plugin)
+- Trivial fixes that don't generalize
+- Things already covered in `LEARNINGS.md`
+
+### Checking for Updates From Other Plugins
+
+Other plugins may have discovered patterns that help this one. Before a release
+or when troubleshooting, check if `LEARNINGS.md` has new entries by fetching and
+scanning the sections relevant to the current task.
+
+### Template Companion Guides
+
+The template also maintains merged guides that this plugin may benefit from:
+
+| Guide | URL |
+|-------|-----|
+| Testing Protocol | `https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/scaffold/.github/TESTING-PROTOCOL.md` |
+| UI/UX Design Guide | `https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/scaffold/.github/UI-DESIGN-GUIDE.md` |
+
+Read these before writing tests or making UI changes — they contain hardware-tested
+patterns and failure logs from multiple plugins.
