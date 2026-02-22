@@ -46,6 +46,49 @@ This runs `prepack` (test + lint), then `build`, then `streamdeck pack` to produ
 
 **Never skip tests before packaging.** The `prepack` script enforces this.
 
+### 5. Pre-Release Checklist — MANDATORY
+
+**Agents MUST NOT tag, push, or create a release without completing every step below.** This is a blocking gate — no exceptions.
+
+#### Automated checks (agent runs these)
+1. `npm test` — all tests pass.
+2. `npm run lint` — no TypeScript errors.
+3. `npm run build` — successful Rollup build.
+4. `npm run validate` — Stream Deck CLI manifest/schema validation passes.
+5. `streamdeck restart com.pedrofuentes.cloudflare-utilities` — plugin hot-reloads in Stream Deck without crash.
+
+#### Manual device test (user performs this)
+6. **ASK the user to test on their physical Stream Deck.** The agent must explicitly prompt:
+   > "Before I tag and release, please test the plugin on your Stream Deck and confirm everything works. Specifically, please verify: [list what changed]."
+7. **Wait for explicit user confirmation** before proceeding to version bump / tag / push / release.
+
+#### Why the CLI alone is NOT enough
+- `streamdeck validate` only checks the manifest JSON schema — it does **not** test runtime behavior, UI rendering, API calls, or key display.
+- `streamdeck restart` confirms the plugin loads without an immediate crash, but cannot verify functional correctness.
+- `streamdeck dev` enables developer mode (debug logging) — useful for troubleshooting but not a substitute for manual testing.
+- The Stream Deck CLI has **no automated functional testing** capability. All real verification must happen on the physical device.
+
+#### What to verify on device
+- All actions appear in the Stream Deck action list with correct icons.
+- Each action's Property Inspector loads correctly and all dropdowns/settings work.
+- Keys render with correct accent bar colors, text, and layout.
+- Polling/refresh works (data updates after the configured interval).
+- Key presses cycle metrics or trigger expected behavior.
+- Marquee scrolling works for long names (> 10 characters).
+- Error states display correctly (no credentials, bad API response, etc.).
+
+#### Release flow (after user confirms)
+```bash
+# Version bump
+# Edit package.json → new version
+# Edit manifest.json → new Version (x.y.z.0 format)
+
+git add -A && git commit -m "chore: bump version to x.y.z"
+git tag vx.y.z
+git push origin main --tags
+npm run pack  # Produces dist/*.streamDeckPlugin
+```
+
 ## Architecture
 
 ### Directory Structure
