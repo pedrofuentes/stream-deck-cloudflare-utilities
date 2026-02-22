@@ -108,7 +108,7 @@ npm install
 npm run build
 
 # Link to Stream Deck for development
-streamdeck link com.pedrofuentes.cloudflare-utilities.sdPlugin
+streamdeck link release/com.pedrofuentes.cloudflare-utilities.sdPlugin
 ```
 
 ## Development
@@ -177,16 +177,21 @@ The output is a `.streamDeckPlugin` file ready for distribution.
 
 ```
 .
-├── com.pedrofuentes.cloudflare-utilities.sdPlugin/  # Compiled plugin (distributed)
-│   ├── bin/                     # Compiled JS output
+├── plugin/                              # Plugin source assets (tracked in git)
 │   ├── imgs/                    # Plugin & action icons
-│   │   ├── actions/             # Action-specific icons
-│   │   └── plugin/              # Plugin-level icons
-│   ├── ui/                      # Property inspector HTML files
+│   │   ├── actions/             # Action-specific icons (SVG)
+│   │   └── plugin/              # Plugin-level icons (PNG)
+│   ├── ui/                      # Property Inspector HTML files
 │   │   ├── setup.html           # Shared credentials setup window
 │   │   └── *.html               # Per-action property inspectors
 │   ├── manifest.json            # Plugin manifest
 │   └── .sdignore                # Files to exclude from packaging
+├── release/                             # Build output (gitignored)
+│   └── com.pedrofuentes.cloudflare-utilities.sdPlugin/
+│       ├── bin/                 # Compiled JS (Rollup output)
+│       ├── imgs/                # Copied from plugin/
+│       ├── ui/                  # Copied from plugin/
+│       └── manifest.json        # Copied from plugin/
 ├── src/                         # TypeScript source
 │   ├── actions/                 # Stream Deck action implementations
 │   │   ├── ai-gateway-metric.ts

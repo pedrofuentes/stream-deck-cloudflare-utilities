@@ -137,12 +137,18 @@ tests/                # Mirrors src/ structure
 ├── services/
 └── types/
 
-com.pedrofuentes.cloudflare-utilities.sdPlugin/  # Compiled plugin
-├── bin/              # Build output (JS)
-├── imgs/             # Icons (SVG)
+plugin/               # Plugin source assets (tracked in git)
+├── imgs/             # Icons (SVG & PNG)
 ├── ui/               # Property inspector HTML
 ├── manifest.json     # Plugin manifest
 └── .sdignore         # Packaging exclusions
+
+release/              # Build output (gitignored)
+└── com.pedrofuentes.cloudflare-utilities.sdPlugin/
+    ├── bin/          # Compiled JS (Rollup output)
+    ├── imgs/         # Copied from plugin/
+    ├── ui/           # Copied from plugin/
+    └── manifest.json # Copied from plugin/
 ```
 
 ### Key Patterns
@@ -162,9 +168,9 @@ com.pedrofuentes.cloudflare-utilities.sdPlugin/  # Compiled plugin
 
 1. **Create** `src/actions/<action-name>.ts` with a class extending `SingletonAction`.
 2. **Register** the action in `src/plugin.ts`.
-3. **Add** the action to `com.pedrofuentes.cloudflare-utilities.sdPlugin/manifest.json`.
-4. **Create** `com.pedrofuentes.cloudflare-utilities.sdPlugin/ui/<action-name>.html` if the action needs settings.
-5. **Add** icon SVGs in `com.pedrofuentes.cloudflare-utilities.sdPlugin/imgs/actions/`.
+3. **Add** the action to `plugin/manifest.json`.
+4. **Create** `plugin/ui/<action-name>.html` if the action needs settings.
+5. **Add** icon SVGs in `plugin/imgs/actions/`.
 6. **Write tests** in `tests/actions/<action-name>.test.ts` — see `.github/TESTING-PROTOCOL.md` for patterns.
 7. **Follow UI rules** in `.github/UI-DESIGN-GUIDE.md` — use the shared renderer, accent bar pattern, etc.
 8. **Update** `README.md` to document the new action.
@@ -305,7 +311,7 @@ API credentials (API Token, Account ID) are shared across all actions via Stream
 
 1. **`src/services/global-settings-store.ts`** — In-memory store with pub/sub. Actions subscribe to changes.
 2. **`src/plugin.ts`** — Loads global settings on startup and listens for updates via `onDidReceiveGlobalSettings`.
-3. **`com.pedrofuentes.cloudflare-utilities.sdPlugin/ui/setup.html`** — Shared setup window opened from any action's PI. Reads/writes global settings via `$SD.getGlobalSettings()` / `$SD.setGlobalSettings()`.
+3. **`plugin/ui/setup.html`** — Shared setup window opened from any action's PI. Reads/writes global settings via `$SD.getGlobalSettings()` / `$SD.setGlobalSettings()`.
 4. **Each action** subscribes via `onGlobalSettingsChanged()` and re-initializes when credentials change.
 
 ### Adding global settings fields

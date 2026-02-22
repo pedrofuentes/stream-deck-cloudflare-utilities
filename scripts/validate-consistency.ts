@@ -18,10 +18,7 @@ import * as path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const SRC_ACTIONS = path.join(ROOT, "src", "actions");
-const PLUGIN_DIR = path.join(
-  ROOT,
-  "com.pedrofuentes.cloudflare-utilities.sdPlugin",
-);
+const PLUGIN_DIR = path.join(ROOT, "plugin");
 const MANIFEST_PATH = path.join(PLUGIN_DIR, "manifest.json");
 const UI_DIR = path.join(PLUGIN_DIR, "ui");
 const IMGS_DIR = path.join(PLUGIN_DIR, "imgs", "actions");

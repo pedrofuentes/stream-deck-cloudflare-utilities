@@ -60,7 +60,7 @@ npm run build
 ### Link for Development
 
 ```bash
-streamdeck link com.pedrofuentes.cloudflare-utilities.sdPlugin
+streamdeck link release/com.pedrofuentes.cloudflare-utilities.sdPlugin
 ```
 
 ### Watch Mode (Recommended for Development)
@@ -92,7 +92,7 @@ tests/                # Test files (mirrors src/ structure)
 - **Services** (`src/services/`): Business logic and external API clients. These are independent of Stream Deck and should be easily testable.
 - **Types** (`src/types/`): Shared TypeScript interfaces and type definitions.
 - **Plugin entry** (`src/plugin.ts`): Registers all actions with the Stream Deck SDK and calls `streamDeck.connect()`.
-- **Manifest** (`*.sdPlugin/manifest.json`): Defines the plugin metadata, actions, and their UUIDs. Update this when adding new actions.
+- **Manifest** (`plugin/manifest.json`): Defines the plugin metadata, actions, and their UUIDs. Update this when adding new actions.
 
 ### Plugin UUID Convention
 
@@ -249,9 +249,9 @@ docs(readme): update installation instructions
 
 1. Create the action file in `src/actions/<action-name>.ts`.
 2. Register the action in `src/plugin.ts`.
-3. Add the action definition to `*.sdPlugin/manifest.json`.
-4. Create the property inspector HTML in `*.sdPlugin/ui/<action-name>.html` (if needed).
-5. Add action icon SVGs in `*.sdPlugin/imgs/actions/`.
+3. Add the action definition to `plugin/manifest.json`.
+4. Create the property inspector HTML in `plugin/ui/<action-name>.html` (if needed).
+5. Add action icon SVGs in `plugin/imgs/actions/`.
 6. Write comprehensive tests in `tests/actions/<action-name>.test.ts`.
 7. Update `README.md` with the new feature.
 
@@ -264,7 +264,7 @@ Use [GitHub Issues](https://github.com/pedrofuentes/stream-deck-cloudflare-utili
 - Plugin version
 - Steps to reproduce
 - Expected vs actual behavior
-- Relevant logs from `*.sdPlugin/logs/`
+- Relevant logs from `release/com.pedrofuentes.cloudflare-utilities.sdPlugin/logs/`
 
 ## Requesting Features
 

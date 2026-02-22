@@ -4,7 +4,7 @@
     "module": "ES2022",
     "moduleResolution": "bundler",
     "lib": ["ES2022"],
-    "outDir": "./com.pedrofuentes.cloudflare-utilities.sdPlugin/bin",
+    "outDir": "./release/com.pedrofuentes.cloudflare-utilities.sdPlugin/bin",
     "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,

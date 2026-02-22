@@ -2,9 +2,9 @@
 node_modules/
 
 # Build output
-com.pedrofuentes.cloudflare-utilities.sdPlugin/bin/
-com.pedrofuentes.cloudflare-utilities.sdPlugin/logs/
+release/
 dist/
+com.pedrofuentes.cloudflare-utilities.sdPlugin/
 
 # IDE
 .vscode/

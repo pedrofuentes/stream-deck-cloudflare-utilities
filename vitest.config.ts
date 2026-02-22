@@ -12,7 +12,7 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["tests/**/*.test.ts", "src/**/*.test.ts"],
-    exclude: ["node_modules", "com.pedrofuentes.cloudflare-utilities.sdPlugin"],
+    exclude: ["node_modules", "release", "plugin"],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov", "html"],
