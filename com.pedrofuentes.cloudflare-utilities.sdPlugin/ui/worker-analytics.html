@@ -76,43 +76,6 @@
         appearance: auto;
       }
 
-      .dropdown-row {
-        display: flex;
-        gap: 4px;
-        align-items: stretch;
-      }
-
-      .dropdown-row select {
-        flex: 1;
-      }
-
-      .load-btn {
-        flex: 0 0 auto;
-        background: var(--bg-input);
-        color: var(--text-muted);
-        border: 1px solid var(--border);
-        border-radius: 3px;
-        padding: 4px 5px 2px;
-        cursor: pointer;
-        font-size: 12px;
-        font-family: var(--font);
-        white-space: nowrap;
-        line-height: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .load-btn:hover {
-        background: #4d4d4d;
-        color: var(--text);
-      }
-
-      .load-btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-
       .status-msg {
         font-size: 10px;
         color: var(--text-muted);
@@ -191,14 +154,7 @@
     <div class="sdpi-item">
       <div class="sdpi-item-label">Worker</div>
       <div class="sdpi-item-value">
-        <div class="dropdown-row">
-          <select id="workerName">
-            <option value="">-- Select Worker --</option>
-          </select>
-          <button type="button" id="loadWorkersBtn" class="load-btn" title="Load workers from Cloudflare">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.34 13a10 10 0 1 1-2.83-7.83L21.5 8"/></svg>
-          </button>
-        </div>
+        <div id="workerNameContainer"></div>
       </div>
     </div>
     <div class="status-msg" id="workerStatus"></div>
@@ -232,24 +188,12 @@
       </div>
     </div>
 
-    <div class="sdpi-item">
-      <div class="sdpi-item-label">Refresh (s)</div>
-      <div class="sdpi-item-value">
-        <input
-          type="number"
-          id="refreshIntervalSeconds"
-          placeholder="60"
-          min="10"
-          max="3600"
-        />
-      </div>
-    </div>
-
     <div class="tips">
       <strong>Tip:</strong> Press the key to cycle metrics: Requests → Errors →
       Error Rate → CPU P50 → CPU P99 → Wall Time → Subrequests.
     </div>
 
+    <script src="filterable-select.js"></script>
     <script>
       /* ───────── Stream Deck WebSocket ───────── */
       var websocket = null;
@@ -258,6 +202,22 @@
       var actionSettings = {};
 
       var CF_API = "https://api.cloudflare.com/client/v4";
+
+      /* ───────── FilterableSelect instance ───────── */
+      var workerFS = new FilterableSelect({
+        container: document.getElementById("workerNameContainer"),
+        setting: "workerName",
+        placeholder: "-- Select Worker --",
+        searchPlaceholder: "Search workers…",
+        threshold: 8,
+        onRefresh: function () {
+          loadWorkers();
+        },
+        onChange: function (value, label) {
+          actionSettings.workerName = value;
+          saveActionSettings();
+        },
+      });
 
       function connectElgatoStreamDeckSocket(
         port,
@@ -298,7 +258,7 @@
               if (
                 globalSettings.apiToken &&
                 globalSettings.accountId &&
-                !workerSelect.value
+                !workerFS.value
               ) {
                 loadWorkers();
               }
@@ -350,10 +310,8 @@
       /* ───────── Settings ↔ Form ───────── */
 
       var ACTION_FIELDS = [
-        "workerName",
         "metric",
         "timeRange",
-        "refreshIntervalSeconds",
       ];
 
       function populateActionFields() {
@@ -361,19 +319,14 @@
           var el = document.getElementById(key);
           if (el) el.value = actionSettings[key] || "";
         });
-        ensureOption("workerName", actionSettings.workerName);
+        // Set FilterableSelect value
+        if (actionSettings.workerName) {
+          workerFS.value = actionSettings.workerName;
+        }
       }
 
       function ensureOption(selectId, value) {
-        if (!value) return;
-        var sel = document.getElementById(selectId);
-        if (!sel.querySelector('option[value="' + CSS.escape(value) + '"]')) {
-          var opt = document.createElement("option");
-          opt.value = value;
-          opt.textContent = value;
-          sel.appendChild(opt);
-          sel.value = value;
-        }
+        // No longer needed — FilterableSelect manages its own items
       }
 
       function saveActionSettings() {
@@ -381,6 +334,8 @@
           var el = document.getElementById(key);
           if (el) actionSettings[key] = el.value;
         });
+        // Include FilterableSelect value
+        actionSettings.workerName = workerFS.value;
 
         if (websocket && websocket.readyState === WebSocket.OPEN) {
           websocket.send(
@@ -420,34 +375,9 @@
               : "#969696";
       }
 
-      function populateSelect(selectEl, items, placeholder, currentValue) {
-        selectEl.innerHTML = "";
-        var ph = document.createElement("option");
-        ph.value = "";
-        ph.textContent = placeholder;
-        selectEl.appendChild(ph);
-
-        items.forEach(function (item) {
-          var opt = document.createElement("option");
-          opt.value = item.value;
-          opt.textContent = item.label;
-          selectEl.appendChild(opt);
-        });
-
-        if (currentValue) {
-          selectEl.value = currentValue;
-        }
-      }
-
       /* ───────── Worker List Fetch ───────── */
 
-      var loadWorkersBtn = document.getElementById("loadWorkersBtn");
-      var workerSelect = document.getElementById("workerName");
       var workerStatusDiv = document.getElementById("workerStatus");
-
-      loadWorkersBtn.addEventListener("click", function () {
-        loadWorkers();
-      });
 
       async function loadWorkers() {
         var apiToken = globalSettings.apiToken;
@@ -462,7 +392,6 @@
           return;
         }
 
-        loadWorkersBtn.disabled = true;
         showStatus(workerStatusDiv, "Loading workers…", "info");
 
         try {
@@ -493,8 +422,6 @@
             throw new Error(msg);
           }
 
-          var currentValue = workerSelect.value;
-
           var workers = data.result
             .map(function (w) {
               return { value: w.id, label: w.id };
@@ -503,12 +430,7 @@
               return a.label.localeCompare(b.label);
             });
 
-          populateSelect(
-            workerSelect,
-            workers,
-            "-- Select Worker --",
-            currentValue
-          );
+          workerFS.setItems(workers);
 
           var count = workers.length;
           showStatus(
@@ -522,8 +444,6 @@
             err.message || "Failed to load workers",
             "error"
           );
-        } finally {
-          loadWorkersBtn.disabled = false;
         }
       }
     </script>

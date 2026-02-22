@@ -19,6 +19,7 @@
 8. [Marquee (Scrolling Text) System](#8-marquee-scrolling-text-system)
 9. [Manifest & Icon Configuration](#9-manifest--icon-configuration)
 10. [Property Inspector (PI) Guidelines](#10-property-inspector-pi-guidelines)
+    - [FilterableSelect — Searchable Dropdown Component](#filterableselect--searchable-dropdown-component)
 11. [Feedback Patterns](#11-feedback-patterns)
 12. [Device Specifications](#12-device-specifications)
 13. [Key Image Renderer — Shared Service](#13-key-image-renderer--shared-service)
@@ -460,6 +461,154 @@ actions → subscribe via onGlobalSettingsChanged() → re-initialize API client
 
 **Never store `apiToken` or `accountId` in per-action settings.** Always use `getGlobalSettings()`.
 
+### FilterableSelect — Searchable Dropdown Component
+
+For dynamic dropdowns that load data from APIs (workers, gateways, components), use the **FilterableSelect** component instead of a native `<select>`. This provides type-to-filter search for large lists, keyboard navigation, and viewport-aware positioning.
+
+#### When to Use
+
+| Dropdown Type | Use FilterableSelect? | Why |
+|---------------|----------------------|-----|
+| Workers list (dynamic, API-loaded) | **YES** | Users can have dozens of workers |
+| Gateways list (dynamic, API-loaded) | **YES** | Lists grow with usage |
+| Cloudflare status components (dynamic, 30+ items) | **YES** | ~30 fixed components from Statuspage.io |
+| Metric selector (static, 3–7 options) | **NO** | Too few items — native select is simpler |
+| Time range (static, 3 options) | **NO** | Too few items |
+| Refresh interval (static, 5 options) | **NO** | Too few items |
+
+**Rule of thumb**: If items come from an API call or exceed ~8 entries, use FilterableSelect.
+
+#### Architecture
+
+```
+┌─────────────────────────────────────┐
+│ Property Inspector HTML             │
+│                                     │
+│  ┌──────────────────────┐           │
+│  │ <div id="container"> │           │
+│  │  ┌────────────┬────┐ │           │
+│  │  │ Trigger ▾  │ ↻  │ │  ← Combobox button + refresh
+│  │  └────────────┴────┘ │           │
+│  └──────────────────────┘           │
+│                                     │
+│  ┌──────────────────────┐           │
+│  │ Dropdown (portalled  │           │  ← position: fixed on <body>
+│  │ to <body>)           │           │
+│  │ ┌──────────────────┐ │           │
+│  │ │ 🔍 Search input  │ │  ← Hidden when items ≤ threshold
+│  │ ├──────────────────┤ │           │
+│  │ │ Item 1           │ │           │
+│  │ │ Item 2 (selected)│ │  ← Scrollable list
+│  │ │ Item 3           │ │           │
+│  │ ├──────────────────┤ │           │
+│  │ │ 3 of 25          │ │  ← Result count (when filtering)
+│  │ └──────────────────┘ │           │
+│  └──────────────────────┘           │
+└─────────────────────────────────────┘
+```
+
+#### Implementation Pattern
+
+**1. Include the script:**
+
+```html
+<script src="filterable-select.js"></script>
+```
+
+**2. Add a container div (replaces `<select>`):**
+
+```html
+<div class="sdpi-item">
+  <div class="sdpi-item-label">Worker</div>
+  <div class="sdpi-item-value">
+    <div id="workerNameContainer"></div>
+  </div>
+</div>
+<div class="status-msg" id="workerStatus"></div>
+```
+
+**3. Initialize the component:**
+
+```javascript
+var workerFS = new FilterableSelect({
+  container: document.getElementById("workerNameContainer"),
+  setting: "workerName",
+  placeholder: "-- Select Worker --",
+  searchPlaceholder: "Search workers…",
+  threshold: 8,
+  onRefresh: function () { loadWorkers(); },
+  onChange: function (value, label) {
+    actionSettings.workerName = value;
+    saveActionSettings();
+  },
+});
+```
+
+**4. Feed data after API fetch:**
+
+```javascript
+async function loadWorkers() {
+  // ... fetch from API ...
+  var workers = data.result
+    .map(function (w) { return { value: w.id, label: w.id }; })
+    .sort(function (a, b) { return a.label.localeCompare(b.label); });
+  workerFS.setItems(workers);
+  showStatus(workerStatusDiv, workers.length + " workers found", "success");
+}
+```
+
+**5. Restore saved value on settings load:**
+
+```javascript
+function populateActionFields() {
+  if (actionSettings.workerName) {
+    workerFS.value = actionSettings.workerName;
+  }
+}
+```
+
+#### API Reference
+
+| Constructor Option | Type | Default | Description |
+|-------------------|------|---------|-------------|
+| `container` | `HTMLElement` | *required* | DOM element to mount into |
+| `setting` | `string` | *required* | Setting key name (for events) |
+| `placeholder` | `string` | `"Select…"` | Trigger placeholder text |
+| `searchPlaceholder` | `string` | `"Type to filter…"` | Search input placeholder |
+| `threshold` | `number` | `8` | Show search when selectable items > N |
+| `initialValue` | `string` | — | Initial selected value |
+| `onRefresh` | `function` | — | Called when refresh button clicked |
+| `onSelect` | `function(value, label)` | — | Called on every selection |
+| `onChange` | `function(value, label)` | — | Called only when value changes |
+
+| Method | Description |
+|--------|-------------|
+| `.setItems(items)` | Set dropdown items: `[{value, label, disabled?}]`. Stops spin animation. |
+| `.refresh()` | Trigger refresh (spin animation + call `onRefresh`). |
+| `.value` | Get/set the selected value. |
+| `.destroy()` | Remove all DOM elements and clean up. |
+
+#### Key Design Decisions
+
+1. **Callback-based, not event-based**: Unlike the GitHub Utilities version (which uses `sdpi-datasource` CustomEvents and `sendToPlugin`), this version uses simple callbacks (`onRefresh`, `onChange`). This is because Cloudflare PIs fetch API data directly in the browser, not via the plugin process.
+
+2. **Dropdown portalled to `<body>`**: The dropdown uses `position: fixed` and is appended to `<body>`, not inside the container. This prevents overflow clipping from parent containers.
+
+3. **Viewport-aware flip**: The dropdown automatically flips above the trigger when there isn't enough space below. Critical for the PI's small viewport (300-500px).
+
+4. **Search auto-hidden**: When the number of selectable items is ≤ threshold (default 8), the search input is hidden to avoid visual noise.
+
+5. **CSS uses PI CSS variables**: Colors reference `--bg-input`, `--border`, `--text`, `--text-muted`, `--accent` with dark fallbacks, matching the custom CSS used in Cloudflare PI files.
+
+#### Anti-Patterns
+
+| Don't | Do Instead |
+|-------|-----------|
+| Use FilterableSelect for static ≤10 option lists | Native `<select>` is simpler and accessible |
+| Call `setItems()` without first calling `loadX()` | Always fetch fresh data — stale lists confuse users |
+| Forget to wire `onChange` to `saveActionSettings()` | The component doesn't auto-save — you must persist |
+| Create the component after WebSocket connects | Create it immediately in the `<script>` block — it handles empty state gracefully |
+
 ---
 
 ## 11. Feedback Patterns
@@ -721,4 +870,4 @@ When you discover new UI patterns, SDK capabilities, or hardware quirks:
 2. Add failures to the [Design Decisions Log](#16-design-decisions-log-what-failed--why) so they're not repeated
 3. Keep entries concise — this is a reference, not a tutorial
 4. Add new external references to [section 18](#18-references--documentation)
-5. Reference `AGENTS.md` for project rules and `TESTING-PROTOCOL.md` for test patterns
+5. Reference `AGENTS.md` for project rules and `.github/TESTING-PROTOCOL.md` for test patterns

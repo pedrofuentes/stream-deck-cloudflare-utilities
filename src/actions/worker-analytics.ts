@@ -25,6 +25,7 @@ import { formatCompactNumber, RateLimitError } from "../services/cloudflare-ai-g
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, STATUS_COLORS } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
+import { getPollingCoordinator } from "../services/polling-coordinator";
 import type {
   WorkerAnalyticsSettings,
   WorkerAnalyticsMetricType,
@@ -112,10 +113,12 @@ export function formatMetricValue(
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.worker-analytics" })
 export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
   private apiClient: CloudflareWorkerAnalyticsApi | null = null;
-  private refreshTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  /** Generation counter — see AI Gateway Metric for pattern docs. */
-  private refreshGeneration = 0;
+  /**
+   * Fetch generation counter. Incremented before every fetch so stale
+   * async completions can detect they are outdated and skip rendering.
+   */
+  private fetchGeneration = 0;
 
   /** Cached metrics for display on key press cycling. */
   private lastMetrics: WorkerAnalyticsMetrics | null = null;
@@ -139,10 +142,9 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
   /** Unsubscribe function for global settings listener. */
   private unsubscribeGlobal: (() => void) | null = null;
 
-  /** Back-off after error (30 s). */
-  private static readonly ERROR_BACKOFF_MS = 30 * 1000;
-  /** Back-off after rate-limit (90 s). */
-  private static readonly RATE_LIMIT_BACKOFF_MS = 90 * 1000;
+  /** Unsubscribe function for the polling coordinator. */
+  private unsubscribeCoordinator: (() => void) | null = null;
+
   /** Marquee tick interval. */
   private static readonly MARQUEE_INTERVAL_MS = 500;
 
@@ -151,10 +153,11 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
   /** Marquee animation interval handle. */
   private marqueeInterval: ReturnType<typeof setInterval> | null = null;
 
-  /** Whether the last fetch errored (for adaptive polling). */
+  /** Whether the last fetch errored. */
   private isErrorState = false;
-  /** Server-hinted rate limit backoff ms. */
-  private rateLimitBackoffMs = 0;
+
+  /** Timestamp until which coordinator ticks should be skipped (rate-limit/error). */
+  private skipUntil = 0;
 
   /**
    * Called when the action appears on the Stream Deck.
@@ -162,6 +165,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
   override async onWillAppear(ev: WillAppearEvent<WorkerAnalyticsSettings>): Promise<void> {
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
+    this.subscribeToCoordinator();
 
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
@@ -185,7 +189,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       })
     );
 
-    await this.fetchAndSchedule(ev);
+    await this.updateMetrics(ev);
   }
 
   /**
@@ -195,7 +199,6 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     ev: DidReceiveSettingsEvent<WorkerAnalyticsSettings>
   ): Promise<void> {
     this.lastEvent = ev;
-    this.clearRefreshTimeout();
 
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
@@ -215,7 +218,6 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
 
     if (this.pendingKeyCycle) {
       this.pendingKeyCycle = false;
-      this.scheduleRefresh(ev);
       return;
     }
 
@@ -232,7 +234,6 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
         )
       );
       this.startMarqueeIfNeeded();
-      this.scheduleRefresh(ev);
       return;
     }
 
@@ -252,14 +253,17 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       })
     );
 
-    await this.fetchAndSchedule(ev);
+    await this.updateMetrics(ev);
   }
 
   /**
    * Called when the action disappears from the Stream Deck.
    */
   override onWillDisappear(_ev: WillDisappearEvent<WorkerAnalyticsSettings>): void {
-    this.clearRefreshTimeout();
+    if (this.unsubscribeCoordinator) {
+      this.unsubscribeCoordinator();
+      this.unsubscribeCoordinator = null;
+    }
     this.stopMarqueeTimer();
     this.apiClient = null;
     this.lastMetrics = null;
@@ -269,6 +273,8 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     this.displayMetric = "requests";
     this.marquee.setText("");
     this.lastEvent = null;
+    this.isErrorState = false;
+    this.skipUntil = 0;
     if (this.unsubscribeGlobal) {
       this.unsubscribeGlobal();
       this.unsubscribeGlobal = null;
@@ -285,8 +291,6 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     if (!this.hasRequiredSettings(settings, global)) {
       return;
     }
-
-    this.clearRefreshTimeout();
 
     const currentMetric = this.displayMetric;
     const currentIndex = WORKER_METRIC_CYCLE_ORDER.indexOf(currentMetric);
@@ -317,14 +321,15 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
 
   /**
    * Fetches metrics from the API and updates the key display.
+   * Increments the fetch generation counter to prevent stale renders.
    */
   private async updateMetrics(
     ev:
       | WillAppearEvent<WorkerAnalyticsSettings>
       | KeyDownEvent<WorkerAnalyticsSettings>
       | DidReceiveSettingsEvent<WorkerAnalyticsSettings>,
-    generation?: number
   ): Promise<void> {
+    const gen = ++this.fetchGeneration;
     const settings = ev.payload.settings;
 
     if (!this.apiClient || !settings.workerName) {
@@ -337,11 +342,13 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     try {
       const metrics = await this.apiClient.getAnalytics(settings.workerName, timeRange);
 
-      if (generation !== undefined && this.refreshGeneration !== generation) return;
+      // Verify this fetch is still current
+      if (this.fetchGeneration !== gen) return;
 
       this.lastMetrics = metrics;
       this.lastWorkerName = settings.workerName;
       this.isErrorState = false;
+      this.skipUntil = 0;
 
       await ev.action.setImage(
         this.renderMetric(
@@ -354,14 +361,16 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       );
       this.startMarqueeIfNeeded();
     } catch (error) {
-      if (generation !== undefined && this.refreshGeneration !== generation) return;
+      // If stale, silently abort — a newer cycle owns the display
+      if (this.fetchGeneration !== gen) return;
 
       this.isErrorState = true;
 
+      // Rate limit: use longer backoff from server hint if available
       if (error instanceof RateLimitError && error.retryAfterSeconds > 0) {
-        this.rateLimitBackoffMs = error.retryAfterSeconds * 1000;
+        this.skipUntil = Date.now() + error.retryAfterSeconds * 1000;
       } else {
-        this.rateLimitBackoffMs = 0;
+        this.skipUntil = Date.now() + getPollingCoordinator().intervalMs * 2;
       }
 
       if (this.lastMetrics) {
@@ -422,56 +431,25 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
   }
 
   /**
-   * Returns the polling interval in ms. Uses back-off after errors.
+   * Subscribes to the shared polling coordinator so this action
+   * receives periodic refresh ticks without managing its own timer.
    */
-  public getPollingInterval(baseIntervalSeconds: number): number {
-    if (this.isErrorState) {
-      if (this.rateLimitBackoffMs > 0) {
-        return this.rateLimitBackoffMs;
-      }
-      return WorkerAnalytics.RATE_LIMIT_BACKOFF_MS;
-    }
-    return baseIntervalSeconds * 1000;
+  private subscribeToCoordinator(): void {
+    if (this.unsubscribeCoordinator) return;
+    this.unsubscribeCoordinator = getPollingCoordinator().subscribe(
+      "worker-analytics",
+      () => this.onCoordinatorTick(),
+    );
   }
 
-  private async fetchAndSchedule(
-    ev:
-      | WillAppearEvent<WorkerAnalyticsSettings>
-      | DidReceiveSettingsEvent<WorkerAnalyticsSettings>
-  ): Promise<void> {
-    this.clearRefreshTimeout();
-    const gen = ++this.refreshGeneration;
-
-    await this.updateMetrics(ev, gen);
-
-    if (this.refreshGeneration !== gen) return;
-    this.scheduleRefresh(ev);
-  }
-
-  private scheduleRefresh(
-    ev:
-      | WillAppearEvent<WorkerAnalyticsSettings>
-      | DidReceiveSettingsEvent<WorkerAnalyticsSettings>
-  ): void {
-    this.clearRefreshTimeout();
-
-    const gen = ++this.refreshGeneration;
-    const baseSeconds = ev.payload.settings.refreshIntervalSeconds ?? 60;
-    const delayMs = this.getPollingInterval(baseSeconds);
-
-    this.refreshTimeout = setTimeout(async () => {
-      if (this.refreshGeneration !== gen) return;
-      await this.updateMetrics(ev, gen);
-      if (this.refreshGeneration !== gen) return;
-      this.scheduleRefresh(ev);
-    }, delayMs);
-  }
-
-  private clearRefreshTimeout(): void {
-    if (this.refreshTimeout) {
-      clearTimeout(this.refreshTimeout);
-      this.refreshTimeout = null;
-    }
+  /**
+   * Called by the polling coordinator on each tick. Skips if
+   * rate-limited or missing configuration.
+   */
+  private async onCoordinatorTick(): Promise<void> {
+    if (Date.now() < this.skipUntil) return;
+    if (!this.apiClient || !this.lastEvent) return;
+    await this.updateMetrics(this.lastEvent);
   }
 
   private startMarqueeIfNeeded(): void {
@@ -518,7 +496,6 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     this.unsubscribeGlobal = onGlobalSettingsChanged(async () => {
       if (!this.lastEvent) return;
 
-      this.clearRefreshTimeout();
       this.stopMarqueeTimer();
       this.apiClient = null;
       this.lastMetrics = null;
@@ -542,7 +519,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
         global.accountId!
       );
 
-      await this.fetchAndSchedule(ev);
+      await this.updateMetrics(ev);
     });
   }
 }

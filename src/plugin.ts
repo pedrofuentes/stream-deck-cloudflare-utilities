@@ -12,6 +12,7 @@ import { CloudflareStatus } from "./actions/cloudflare-status";
 import { WorkerAnalytics } from "./actions/worker-analytics";
 import { WorkerDeploymentStatus } from "./actions/worker-deployment-status";
 import { updateGlobalSettings, type GlobalSettings } from "./services/global-settings-store";
+import { getPollingCoordinator, DEFAULT_REFRESH_INTERVAL_SECONDS } from "./services/polling-coordinator";
 
 // Set the log level for the plugin
 streamDeck.logger.setLevel("debug");
@@ -27,11 +28,17 @@ streamDeck.actions.registerAction(new WorkerDeploymentStatus());
 
 streamDeck.settings.getGlobalSettings<GlobalSettings>().then((settings) => {
   updateGlobalSettings(settings ?? {});
+  getPollingCoordinator().setIntervalSeconds(
+    settings?.refreshIntervalSeconds ?? DEFAULT_REFRESH_INTERVAL_SECONDS,
+  );
   streamDeck.logger.debug("Global settings loaded");
 });
 
 streamDeck.settings.onDidReceiveGlobalSettings<GlobalSettings>((ev) => {
   updateGlobalSettings(ev.settings ?? {});
+  getPollingCoordinator().setIntervalSeconds(
+    ev.settings?.refreshIntervalSeconds ?? DEFAULT_REFRESH_INTERVAL_SECONDS,
+  );
   streamDeck.logger.debug("Global settings updated");
 });
 

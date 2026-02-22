@@ -53,8 +53,6 @@ export type WorkerAnalyticsSettings = {
   metric?: WorkerAnalyticsMetricType;
   /** Time range for analytics */
   timeRange?: WorkerAnalyticsTimeRange;
-  /** Refresh interval in seconds (default: 60) */
-  refreshIntervalSeconds?: number;
 };
 
 /**

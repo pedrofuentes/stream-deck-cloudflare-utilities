@@ -19,8 +19,6 @@ export type AiGatewayMetricSettings = {
   metric?: AiGatewayMetricType;
   /** Time range for GraphQL-based metrics */
   timeRange?: AiGatewayTimeRange;
-  /** Refresh interval in seconds (default: 60) */
-  refreshIntervalSeconds?: number;
 };
 
 /**

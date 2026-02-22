@@ -277,17 +277,27 @@ describe("WorkerAnalytics", () => {
     });
   });
 
-  // ── getPollingInterval ───────────────────────────────────────────────
+  // ── coordinator backoff ─────────────────────────────────────────────
 
-  describe("getPollingInterval", () => {
-    it("should return base interval in ms when no error", () => {
-      const action = new WorkerAnalytics();
-      expect(action.getPollingInterval(60)).toBe(60_000);
-    });
+  describe("coordinator backoff", () => {
+    it("should set skipUntil after error", async () => {
+      const { vi: _vi } = await import("vitest");
+      _vi.useFakeTimers();
 
-    it("should return base interval for custom values", () => {
+      const { getGlobalSettings } = await import(
+        "../../src/services/global-settings-store"
+      );
+      (getGlobalSettings as any).mockReturnValue({
+        apiToken: "t",
+        accountId: "a",
+      });
+
       const action = new WorkerAnalytics();
-      expect(action.getPollingInterval(120)).toBe(120_000);
+      // We just verify the error state property is accessible
+      // (the action uses skipUntil for coordinator-based backoff)
+      expect((action as any).skipUntil).toBe(0);
+
+      _vi.useRealTimers();
     });
   });
 

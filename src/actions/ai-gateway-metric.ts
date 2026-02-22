@@ -26,6 +26,7 @@ import {
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, STATUS_COLORS } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
+import { getPollingCoordinator } from "../services/polling-coordinator";
 import type {
   AiGatewayMetricSettings,
   AiGatewayMetricType,
@@ -110,15 +111,12 @@ export function formatMetricValue(metric: AiGatewayMetricType, metrics: AiGatewa
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.ai-gateway-metric" })
 export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   private apiClient: CloudflareAiGatewayApi | null = null;
-  private refreshTimeout: ReturnType<typeof setTimeout> | null = null;
 
   /**
-   * Generation counter for refresh cycles. Incremented on every
-   * `scheduleRefresh` call so that in-flight timer callbacks from a
-   * previous cycle can detect they are stale and abort, preventing
-   * zombie timer chains that render the wrong metric.
+   * Fetch generation counter. Incremented before every fetch so stale
+   * async completions can detect they are outdated and skip rendering.
    */
-  private refreshGeneration = 0;
+  private fetchGeneration = 0;
 
   /** Cached metrics for display on key press cycling (avoids re-fetch). */
   private lastMetrics: AiGatewayMetrics | null = null;
@@ -128,8 +126,6 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
    * The metric currently shown on the key. This is the authoritative
    * source of truth for rendering — updated by onKeyDown (cycle),
    * onWillAppear, onDidReceiveSettings, and onGlobalSettingsChanged.
-   * Using an instance variable avoids stale event payloads in timer
-   * closures from reverting the display after a key-press cycle.
    */
   private displayMetric: AiGatewayMetricType = "requests";
 
@@ -139,8 +135,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   /**
    * Set to `true` by onKeyDown before calling setSettings().
    * When onDidReceiveSettings fires as a result, it detects this flag,
-   * skips re-rendering (onKeyDown already rendered), but still schedules
-   * the next refresh timer. Cleared immediately upon consumption.
+   * skips re-rendering (onKeyDown already rendered), resets the flag.
    */
   private pendingKeyCycle = false;
 
@@ -150,11 +145,8 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   /** Unsubscribe function for global settings listener. */
   private unsubscribeGlobal: (() => void) | null = null;
 
-  /** Back-off interval after an error (30 s). */
-  private static readonly ERROR_BACKOFF_MS = 30 * 1000;
-
-  /** Back-off interval after rate limiting (90 s). */
-  private static readonly RATE_LIMIT_BACKOFF_MS = 90 * 1000;
+  /** Unsubscribe function for the polling coordinator. */
+  private unsubscribeCoordinator: (() => void) | null = null;
 
   /** Marquee tick interval in milliseconds. */
   private static readonly MARQUEE_INTERVAL_MS = 500;
@@ -165,12 +157,19 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   /** Interval handle for the marquee animation timer. */
   private marqueeInterval: ReturnType<typeof setInterval> | null = null;
 
+  /** Whether the last fetch resulted in an error (for backoff). */
+  private isErrorState = false;
+
+  /** Timestamp until which coordinator ticks should be skipped (rate-limit/error). */
+  private skipUntil = 0;
+
   /**
    * Called when the action appears on the Stream Deck.
    */
   override async onWillAppear(ev: WillAppearEvent<AiGatewayMetricSettings>): Promise<void> {
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
+    this.subscribeToCoordinator();
 
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
@@ -195,7 +194,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       })
     );
 
-    await this.fetchAndSchedule(ev);
+    await this.updateMetrics(ev);
   }
 
   /**
@@ -208,7 +207,6 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
    */
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<AiGatewayMetricSettings>): Promise<void> {
     this.lastEvent = ev;
-    this.clearRefreshTimeout();
 
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
@@ -230,7 +228,6 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     // updated displayMetric — just schedule the next poll.
     if (this.pendingKeyCycle) {
       this.pendingKeyCycle = false;
-      this.scheduleRefresh(ev);
       return;
     }
 
@@ -243,7 +240,6 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
         this.renderMetric(this.displayMetric, this.lastGatewayId ?? "", this.lastMetrics, settings.timeRange, this.marquee.getCurrentText())
       );
       this.startMarqueeIfNeeded();
-      this.scheduleRefresh(ev);
       return;
     }
 
@@ -265,14 +261,17 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       })
     );
 
-    await this.fetchAndSchedule(ev);
+    await this.updateMetrics(ev);
   }
 
   /**
    * Called when the action disappears from the Stream Deck.
    */
   override onWillDisappear(_ev: WillDisappearEvent<AiGatewayMetricSettings>): void {
-    this.clearRefreshTimeout();
+    if (this.unsubscribeCoordinator) {
+      this.unsubscribeCoordinator();
+      this.unsubscribeCoordinator = null;
+    }
     this.stopMarqueeTimer();
     this.apiClient = null;
     this.lastMetrics = null;
@@ -282,6 +281,8 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     this.displayMetric = "requests";
     this.marquee.setText("");
     this.lastEvent = null;
+    this.isErrorState = false;
+    this.skipUntil = 0;
     if (this.unsubscribeGlobal) {
       this.unsubscribeGlobal();
       this.unsubscribeGlobal = null;
@@ -299,9 +300,6 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     if (!this.hasRequiredSettings(settings, global)) {
       return;
     }
-
-    // Stop the current refresh timer immediately to prevent stale renders
-    this.clearRefreshTimeout();
 
     // Cycle to the next metric — read from displayMetric (authoritative),
     // not from the event payload which may be a stale snapshot.
@@ -332,19 +330,14 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
 
   /**
    * Fetches metrics from the API and updates the key display.
-   *
-   * @param ev - The triggering event (provides settings and action ref)
-   * @param generation - Optional refresh generation. When provided (from timer
-   *   callbacks), the method checks whether this generation is still current
-   *   after the async fetch returns. If a newer cycle has started, it aborts
-   *   without rendering, preventing stale data from overwriting the display.
+   * Increments the fetch generation counter to prevent stale renders.
    */
   private async updateMetrics(
     ev: WillAppearEvent<AiGatewayMetricSettings>
       | KeyDownEvent<AiGatewayMetricSettings>
       | DidReceiveSettingsEvent<AiGatewayMetricSettings>,
-    generation?: number
   ): Promise<void> {
+    const gen = ++this.fetchGeneration;
     const settings = ev.payload.settings;
 
     if (!this.apiClient || !settings.gatewayId) {
@@ -357,12 +350,13 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     try {
       const metrics = await this.apiClient.getMetrics(settings.gatewayId, timeRange);
 
-      // If a generation was provided, verify this fetch is still current
-      if (generation !== undefined && this.refreshGeneration !== generation) return;
+      // Verify this fetch is still current
+      if (this.fetchGeneration !== gen) return;
 
       this.lastMetrics = metrics;
       this.lastGatewayId = settings.gatewayId;
       this.isErrorState = false;
+      this.skipUntil = 0;
 
       // Always render using the authoritative displayMetric, not the
       // (potentially stale) event payload metric.
@@ -372,19 +366,19 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       this.startMarqueeIfNeeded();
     } catch (error) {
       // If stale, silently abort — a newer cycle owns the display
-      if (generation !== undefined && this.refreshGeneration !== generation) return;
+      if (this.fetchGeneration !== gen) return;
 
       this.isErrorState = true;
 
       // Rate limit: use longer backoff from server hint if available
       if (error instanceof RateLimitError && error.retryAfterSeconds > 0) {
-        this.rateLimitBackoffMs = error.retryAfterSeconds * 1000;
+        this.skipUntil = Date.now() + error.retryAfterSeconds * 1000;
       } else {
-        this.rateLimitBackoffMs = 0;
+        this.skipUntil = Date.now() + getPollingCoordinator().intervalMs * 2;
       }
 
       // If we have cached metrics, keep displaying them silently
-      // (the polling timer will retry with backoff)
+      // (the coordinator will retry on the next tick)
       if (this.lastMetrics) {
         streamDeck.logger.debug(
           `Transient error for "${settings.gatewayId}", keeping cached display:`,
@@ -407,12 +401,6 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       );
     }
   }
-
-  /** Whether the last fetch resulted in an error (for adaptive polling). */
-  private isErrorState = false;
-
-  /** Server-hinted rate limit backoff in ms (0 = not rate-limited). */
-  private rateLimitBackoffMs = 0;
 
   /**
    * Renders the key image for a given metric.
@@ -454,75 +442,25 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   }
 
   /**
-   * Returns the polling interval in ms. Uses back-off after errors.
+   * Subscribes to the shared polling coordinator so this action
+   * receives periodic refresh ticks without managing its own timer.
    */
-  public getPollingInterval(baseIntervalSeconds: number): number {
-    if (this.isErrorState) {
-      // Use server-hinted rate limit backoff, or fixed rate-limit backoff,
-      // or generic error backoff
-      if (this.rateLimitBackoffMs > 0) {
-        return this.rateLimitBackoffMs;
-      }
-      return AiGatewayMetric.RATE_LIMIT_BACKOFF_MS;
-    }
-    return baseIntervalSeconds * 1000;
+  private subscribeToCoordinator(): void {
+    if (this.unsubscribeCoordinator) return;
+    this.unsubscribeCoordinator = getPollingCoordinator().subscribe(
+      "ai-gateway-metric",
+      () => this.onCoordinatorTick(),
+    );
   }
 
   /**
-   * Starts a new fetch cycle: increments the generation, fetches metrics,
-   * and schedules the next poll. If a newer cycle starts while this one
-   * is awaiting the fetch, this cycle detects it and aborts.
-   *
-   * Every entry point that triggers a fetch (onWillAppear,
-   * onDidReceiveSettings, onGlobalSettingsChanged) MUST go through
-   * this method to prevent concurrent timer chains.
+   * Called by the polling coordinator on each tick. Skips if
+   * rate-limited or missing configuration.
    */
-  private async fetchAndSchedule(
-    ev: WillAppearEvent<AiGatewayMetricSettings> | DidReceiveSettingsEvent<AiGatewayMetricSettings>
-  ): Promise<void> {
-    this.clearRefreshTimeout();
-    const gen = ++this.refreshGeneration;
-
-    await this.updateMetrics(ev, gen);
-
-    // If a newer cycle started while we were awaiting, don't schedule
-    if (this.refreshGeneration !== gen) return;
-    this.scheduleRefresh(ev);
-  }
-
-  /**
-   * Schedules the next poll using setTimeout.
-   *
-   * Each call increments `refreshGeneration`. The timer callback
-   * captures its generation and aborts if a newer cycle has started,
-   * which prevents stale callbacks (whose fetch was in-flight when
-   * the user cycled metrics) from hijacking the timer chain.
-   */
-  private scheduleRefresh(
-    ev: WillAppearEvent<AiGatewayMetricSettings> | DidReceiveSettingsEvent<AiGatewayMetricSettings>
-  ): void {
-    this.clearRefreshTimeout();
-
-    const gen = ++this.refreshGeneration;
-    const baseSeconds = ev.payload.settings.refreshIntervalSeconds ?? 60;
-    const delayMs = this.getPollingInterval(baseSeconds);
-
-    this.refreshTimeout = setTimeout(async () => {
-      if (this.refreshGeneration !== gen) return; // stale — a newer cycle owns the timer
-      await this.updateMetrics(ev, gen);
-      if (this.refreshGeneration !== gen) return; // stale after async fetch
-      this.scheduleRefresh(ev);
-    }, delayMs);
-  }
-
-  /**
-   * Clears the pending refresh timeout.
-   */
-  private clearRefreshTimeout(): void {
-    if (this.refreshTimeout) {
-      clearTimeout(this.refreshTimeout);
-      this.refreshTimeout = null;
-    }
+  private async onCoordinatorTick(): Promise<void> {
+    if (Date.now() < this.skipUntil) return;
+    if (!this.apiClient || !this.lastEvent) return;
+    await this.updateMetrics(this.lastEvent);
   }
 
   /**
@@ -576,7 +514,6 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       if (!this.lastEvent) return;
 
       // Re-run the same flow as onDidReceiveSettings
-      this.clearRefreshTimeout();
       this.stopMarqueeTimer();
       this.apiClient = null;
       this.lastMetrics = null;
@@ -598,7 +535,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
 
       this.apiClient = new CloudflareAiGatewayApi(global.apiToken!, global.accountId!);
 
-      await this.fetchAndSchedule(ev);
+      await this.updateMetrics(ev);
     });
   }
 }

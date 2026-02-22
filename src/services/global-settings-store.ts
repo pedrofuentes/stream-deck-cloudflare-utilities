@@ -20,6 +20,8 @@ export type GlobalSettings = {
   apiToken?: string;
   /** Cloudflare Account ID (32-char hex) */
   accountId?: string;
+  /** Shared refresh interval in seconds (30, 60, 120, 300, 600) */
+  refreshIntervalSeconds?: number;
 };
 
 let current: GlobalSettings = {};

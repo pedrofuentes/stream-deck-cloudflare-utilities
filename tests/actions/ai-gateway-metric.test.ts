@@ -14,6 +14,7 @@ import {
 } from "../../src/actions/ai-gateway-metric";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../../src/services/global-settings-store";
+import { resetPollingCoordinator, getPollingCoordinator } from "../../src/services/polling-coordinator";
 import type { AiGatewayMetrics, AiGatewayMetricType } from "../../src/types/cloudflare-ai-gateway";
 
 // Mock the global settings store
@@ -98,7 +99,6 @@ const VALID_SETTINGS = {
   gatewayId: "my-gateway",
   metric: "requests" as const,
   timeRange: "24h" as const,
-  refreshIntervalSeconds: 60,
 };
 
 // ── truncateGatewayName ──────────────────────────────────────────────────────
@@ -248,6 +248,7 @@ describe("AiGatewayMetric", () => {
   });
 
   afterEach(() => {
+    resetPollingCoordinator();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -381,24 +382,39 @@ describe("AiGatewayMetric", () => {
     });
   });
 
-  // ── getPollingInterval ─────────────────────────────────────────────────
+  // ── Polling via coordinator ─────────────────────────────────────────────
 
-  describe("getPollingInterval", () => {
-    it("should return base interval in ms when no error", () => {
-      expect(action.getPollingInterval(60)).toBe(60_000);
+  describe("coordinator polling", () => {
+    it("should subscribe to the coordinator on appear", async () => {
+      mockGetMetrics.mockResolvedValueOnce(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      expect(getPollingCoordinator().subscriberCount).toBeGreaterThanOrEqual(1);
     });
 
-    it("should return base interval for custom seconds", () => {
-      expect(action.getPollingInterval(120)).toBe(120_000);
-    });
-
-    it("should return back-off interval after error", async () => {
-      // Trigger an error state
+    it("should set isErrorState and skipUntil after error", async () => {
       mockGetMetrics.mockRejectedValueOnce(new Error("API error"));
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
 
-      expect(action.getPollingInterval(60)).toBe(90_000);
+      // The action should be in error state with a future skipUntil
+      expect((action as any).isErrorState).toBe(true);
+      expect((action as any).skipUntil).toBeGreaterThan(Date.now() - 1000);
+    });
+
+    it("should reset error state after successful fetch", async () => {
+      mockGetMetrics.mockRejectedValueOnce(new Error("Fail"));
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      expect((action as any).isErrorState).toBe(true);
+
+      // Next coordinator tick succeeds
+      mockGetMetrics.mockResolvedValueOnce(makeMetrics());
+      (action as any).skipUntil = 0; // clear backoff for test
+      await getPollingCoordinator().tick();
+
+      expect((action as any).isErrorState).toBe(false);
+      expect((action as any).skipUntil).toBe(0);
     });
   });
 
@@ -849,13 +865,15 @@ describe("AiGatewayMetric", () => {
   // ── Error back-off polling ─────────────────────────────────────────────
 
   describe("error back-off polling", () => {
-    it("should use 90s back-off after error", async () => {
+    it("should set skipUntil for backoff after error", async () => {
       mockGetMetrics.mockRejectedValueOnce(new Error("Fail"));
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
 
-      // After error, polling interval should be 90s (rate limit backoff)
-      expect(action.getPollingInterval(60)).toBe(90_000);
+      // After error, skipUntil should be set to a future timestamp
+      // (Date.now() + 2 * intervalMs = 0 + 120_000 with fake timers at t=0)
+      expect((action as any).isErrorState).toBe(true);
+      expect((action as any).skipUntil).toBeGreaterThan(0);
     });
 
     it("should recover to normal interval after successful fetch", async () => {
@@ -864,13 +882,16 @@ describe("AiGatewayMetric", () => {
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
 
-      expect(action.getPollingInterval(60)).toBe(90_000);
+      expect((action as any).isErrorState).toBe(true);
+      expect((action as any).skipUntil).toBeGreaterThan(0);
 
-      // Next poll succeeds
+      // Next coordinator tick (after backoff clears) succeeds
       mockGetMetrics.mockResolvedValueOnce(makeMetrics());
-      await vi.advanceTimersByTimeAsync(90_000);
+      (action as any).skipUntil = 0; // simulate backoff expired
+      await getPollingCoordinator().tick();
 
-      expect(action.getPollingInterval(60)).toBe(60_000);
+      expect((action as any).isErrorState).toBe(false);
+      expect((action as any).skipUntil).toBe(0);
     });
 
     it("should keep cached display when refresh fails", async () => {

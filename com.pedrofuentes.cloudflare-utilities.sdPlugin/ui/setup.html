@@ -212,6 +212,21 @@
 
     <hr class="separator" />
 
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Refresh Rate</div>
+      <div class="sdpi-item-value">
+        <select id="refreshIntervalSeconds">
+          <option value="30">Every 30 seconds</option>
+          <option value="60" selected>Every minute</option>
+          <option value="120">Every 2 minutes</option>
+          <option value="300">Every 5 minutes</option>
+          <option value="600">Every 10 minutes</option>
+        </select>
+      </div>
+    </div>
+
+    <hr class="separator" />
+
     <details>
       <summary>How to create an API Token</summary>
       <div class="help-content">
@@ -287,6 +302,7 @@
         var accountId = globalSettings.accountId || "";
         ensureOption("accountId", accountId);
         document.getElementById("accountId").value = accountId;
+        document.getElementById("refreshIntervalSeconds").value = globalSettings.refreshIntervalSeconds || "60";
       }
 
       function ensureOption(selectId, value) {
@@ -304,6 +320,7 @@
       function saveGlobalSettings() {
         globalSettings.apiToken = document.getElementById("apiToken").value;
         globalSettings.accountId = document.getElementById("accountId").value;
+        globalSettings.refreshIntervalSeconds = parseInt(document.getElementById("refreshIntervalSeconds").value, 10) || 60;
 
         var ws = getWebSocket();
         var uuid = getPiUUID();
@@ -333,6 +350,7 @@
         }
       });
       document.getElementById("accountId").addEventListener("change", saveGlobalSettings);
+      document.getElementById("refreshIntervalSeconds").addEventListener("change", saveGlobalSettings);
 
       /* ───────── Shared helpers ───────── */
 

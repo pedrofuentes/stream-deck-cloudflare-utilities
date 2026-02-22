@@ -21,6 +21,7 @@ import { CloudflareWorkersApi, formatTimeAgo, truncateWorkerName } from "../serv
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, STATUS_COLORS } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
+import { getPollingCoordinator } from "../services/polling-coordinator";
 import type { DeploymentStatus } from "../types/cloudflare-workers";
 
 /**
@@ -30,8 +31,6 @@ import type { DeploymentStatus } from "../types/cloudflare-workers";
 export type WorkerDeploymentSettings = {
   /** Name of the Cloudflare Worker script to monitor */
   workerName?: string;
-  /** Refresh interval in seconds (default: 60) */
-  refreshIntervalSeconds?: number;
 };
 
 /**
@@ -55,7 +54,6 @@ type StatusState = "live" | "gradual" | "recent" | "error";
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.worker-deployment-status" })
 export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSettings> {
   private apiClient: CloudflareWorkersApi | null = null;
-  private refreshTimeout: ReturnType<typeof setTimeout> | null = null;
   private lastState: StatusState | null = null;
 
   /** Cached data for display-only refreshes (no API call). */
@@ -72,11 +70,14 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   /** Unsubscribe function for global settings listener. */
   private unsubscribeGlobal: (() => void) | null = null;
 
+  /** Unsubscribe function for the polling coordinator. */
+  private unsubscribeCoordinator: (() => void) | null = null;
+
   /** Ten minutes in milliseconds — threshold for "recent" highlight */
   private static readonly RECENT_THRESHOLD_MS = 10 * 60 * 1000;
 
-  /** Fast polling interval for active states (recent / gradual) */
-  private static readonly FAST_POLL_MS = 10 * 1000;
+  /** Back-off timestamp — skip coordinator ticks until this time. */
+  private skipUntil = 0;
 
   /** Back-off interval after an error */
   private static readonly ERROR_BACKOFF_MS = 30 * 1000;
@@ -109,9 +110,9 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     this.apiClient = new CloudflareWorkersApi(global.apiToken!, global.accountId!);
     this.marquee.setText(settings.workerName ?? "");
 
-    // Fetch immediately, then schedule adaptive polling
+    // Fetch immediately, then let coordinator handle periodic refresh
     await this.updateStatus(ev);
-    this.scheduleRefresh(ev);
+    this.subscribeToCoordinator();
   }
 
   /**
@@ -121,8 +122,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<WorkerDeploymentSettings>): Promise<void> {
     this.lastEvent = ev;
 
-    // Tear down existing refresh cycle
-    this.clearRefreshTimeout();
+    // Tear down existing state
     this.clearDisplayInterval();
     this.stopMarqueeTimer();
     this.apiClient = null;
@@ -141,9 +141,8 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     this.apiClient = new CloudflareWorkersApi(global.apiToken!, global.accountId!);
     this.marquee.setText(settings.workerName ?? "");
 
-    // Fetch immediately with new settings, then schedule adaptive polling
+    // Fetch immediately with new settings
     await this.updateStatus(ev);
-    this.scheduleRefresh(ev);
   }
 
   /**
@@ -151,7 +150,10 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    * Cleans up the refresh interval and API client.
    */
   override onWillDisappear(_ev: WillDisappearEvent<WorkerDeploymentSettings>): void {
-    this.clearRefreshTimeout();
+    if (this.unsubscribeCoordinator) {
+      this.unsubscribeCoordinator();
+      this.unsubscribeCoordinator = null;
+    }
     this.clearDisplayInterval();
     this.stopMarqueeTimer();
     this.marquee.setText("");
@@ -217,6 +219,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     } catch (error) {
       this.lastState = "error";
       this.lastStatus = null;
+      this.skipUntil = Date.now() + WorkerDeploymentStatus.ERROR_BACKOFF_MS;
       this.clearDisplayInterval();
       streamDeck.logger.error(`Failed to fetch deployment status for "${settings.workerName}":`, error);
       await ev.action.setImage(this.renderStatus("error", settings.workerName));
@@ -319,50 +322,19 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   }
 
   /**
-   * Returns the appropriate polling interval in ms based on the current state.
-   *
-   * - "recent" / "gradual" → fast poll (10 s) for responsive feedback
-   * - "error"              → back-off (30 s) to avoid hammering a failing API
-   * - "live" / default     → user-configured interval (default 60 s)
+   * Subscribes to the shared polling coordinator for periodic refreshes.
    */
-  public getPollingInterval(state: StatusState | null, baseIntervalSeconds: number): number {
-    switch (state) {
-      case "recent":
-      case "gradual":
-        return WorkerDeploymentStatus.FAST_POLL_MS;
-      case "error":
-        return WorkerDeploymentStatus.ERROR_BACKOFF_MS;
-      default:
-        return baseIntervalSeconds * 1000;
-    }
-  }
+  private subscribeToCoordinator(): void {
+    if (this.unsubscribeCoordinator) return;
 
-  /**
-   * Schedules the next poll using setTimeout. The delay is chosen adaptively
-   * based on the last resolved state.
-   */
-  private scheduleRefresh(
-    ev: WillAppearEvent<WorkerDeploymentSettings> | DidReceiveSettingsEvent<WorkerDeploymentSettings>
-  ): void {
-    this.clearRefreshTimeout();
-
-    const baseSeconds = ev.payload.settings.refreshIntervalSeconds ?? 60;
-    const delayMs = this.getPollingInterval(this.lastState, baseSeconds);
-
-    this.refreshTimeout = setTimeout(async () => {
-      await this.updateStatus(ev);
-      this.scheduleRefresh(ev);
-    }, delayMs);
-  }
-
-  /**
-   * Clears the pending refresh timeout.
-   */
-  private clearRefreshTimeout(): void {
-    if (this.refreshTimeout) {
-      clearTimeout(this.refreshTimeout);
-      this.refreshTimeout = null;
-    }
+    this.unsubscribeCoordinator = getPollingCoordinator().subscribe(
+      "com.pedrofuentes.cloudflare-utilities.worker-deployment-status",
+      async () => {
+        if (Date.now() < this.skipUntil) return;
+        if (!this.apiClient || !this.lastEvent) return;
+        await this.updateStatus(this.lastEvent);
+      },
+    );
   }
 
   /**
@@ -433,7 +405,6 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       if (!this.lastEvent) return;
 
       // Re-run the same flow as onDidReceiveSettings
-      this.clearRefreshTimeout();
       this.clearDisplayInterval();
       this.stopMarqueeTimer();
       this.apiClient = null;
@@ -454,7 +425,6 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       this.marquee.setText(settings.workerName ?? "");
 
       await this.updateStatus(ev);
-      this.scheduleRefresh(ev);
     });
   }
 

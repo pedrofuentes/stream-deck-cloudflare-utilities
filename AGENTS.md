@@ -8,8 +8,8 @@ This file covers project rules, architecture, and workflow. Detailed guides live
 
 | Document | When to Read |
 |----------|-------------|
-| **`UI-DESIGN-GUIDE.md`** | Any work involving key display, SVG rendering, colors, layout, marquee, icons, Property Inspector, or visual changes. Contains all hardware-tested UX patterns, the color palette, font specs, and a log of failed design attempts. |
-| **`TESTING-PROTOCOL.md`** | Any work involving writing tests, mocking patterns, timer testing, coverage, or pre-release validation. Contains recipes, pitfalls, and the mandatory manual device testing protocol. |
+| **`.github/UI-DESIGN-GUIDE.md`** | Any work involving key display, SVG rendering, colors, layout, marquee, icons, Property Inspector, or visual changes. Contains all hardware-tested UX patterns, the color palette, font specs, and a log of failed design attempts. |
+| **`.github/TESTING-PROTOCOL.md`** | Any work involving writing tests, mocking patterns, timer testing, coverage, or pre-release validation. Contains recipes, pitfalls, and the mandatory manual device testing protocol. |
 | **`SKILLS.md`** | Deep reference: raw research data, SDK component catalog, device specs, and the complete design decisions log. Read before making novel UI changes. |
 
 ---
@@ -35,12 +35,12 @@ This is a **Stream Deck plugin** built with:
 - Edge cases must always be covered: empty inputs, error states, network failures, unexpected data shapes, boundary values.
 - Ensure no regression — run `npm test` and verify 100% pass rate.
 - Coverage thresholds: 80% branches, functions, lines, statements.
-- **See `TESTING-PROTOCOL.md`** for mocking patterns, timer testing recipes, and coverage details.
+- **See `.github/TESTING-PROTOCOL.md`** for mocking patterns, timer testing recipes, and coverage details.
 
 ### 2. UI Changes Require Hardware Testing
 - All visual changes must be tested on a **physical Stream Deck device**.
 - Monitor screenshots are not sufficient — OLED displays have different gamma.
-- **See `UI-DESIGN-GUIDE.md`** for the accent bar pattern, color palette, font specs, and proven layouts.
+- **See `.github/UI-DESIGN-GUIDE.md`** for the accent bar pattern, color palette, font specs, and proven layouts.
 
 ### 3. Commands
 ```bash
@@ -95,7 +95,7 @@ This runs `prepack` (test + lint), then `build`, then `streamdeck pack` to produ
 - The Stream Deck CLI has **no automated functional testing** capability. All real verification must happen on the physical device.
 
 #### What to verify on device
-See **`TESTING-PROTOCOL.md` → "Pre-Release Testing Protocol"** for the full device verification checklist.
+See **`.github/TESTING-PROTOCOL.md` → "Pre-Release Testing Protocol"** for the full device verification checklist.
 
 #### Release flow (after user confirms)
 ```bash
@@ -158,8 +158,8 @@ com.pedrofuentes.cloudflare-utilities.sdPlugin/  # Compiled plugin
 3. **Add** the action to `com.pedrofuentes.cloudflare-utilities.sdPlugin/manifest.json`.
 4. **Create** `com.pedrofuentes.cloudflare-utilities.sdPlugin/ui/<action-name>.html` if the action needs settings.
 5. **Add** icon SVGs in `com.pedrofuentes.cloudflare-utilities.sdPlugin/imgs/actions/`.
-6. **Write tests** in `tests/actions/<action-name>.test.ts` — see `TESTING-PROTOCOL.md` for patterns.
-7. **Follow UI rules** in `UI-DESIGN-GUIDE.md` — use the shared renderer, accent bar pattern, etc.
+6. **Write tests** in `tests/actions/<action-name>.test.ts` — see `.github/TESTING-PROTOCOL.md` for patterns.
+7. **Follow UI rules** in `.github/UI-DESIGN-GUIDE.md` — use the shared renderer, accent bar pattern, etc.
 8. **Update** `README.md` to document the new action.
 
 ## How to Add a New Service
@@ -173,7 +173,7 @@ com.pedrofuentes.cloudflare-utilities.sdPlugin/  # Compiled plugin
 
 ## Testing Guidelines
 
-**Full details in `TESTING-PROTOCOL.md`.** Key points:
+**Full details in `.github/TESTING-PROTOCOL.md`.** Key points:
 
 - Mock `fetch` with `vi.stubGlobal("fetch", mockFetch)`.
 - Mock the Stream Deck SDK module in every action test.
@@ -181,13 +181,13 @@ com.pedrofuentes.cloudflare-utilities.sdPlugin/  # Compiled plugin
 - Always restore real timers in `afterEach`.
 - Test all HTTP error codes (400, 401, 403, 404, 429, 500, 502, 503).
 - Test network failures, JSON parse errors, empty inputs, boundary values.
-- See `TESTING-PROTOCOL.md` for recipes: marquee testing, backoff testing, polling testing.
+- See `.github/TESTING-PROTOCOL.md` for recipes: marquee testing, backoff testing, polling testing.
 
 ---
 
 ## UI / Key Display Rules
 
-**Full details in `UI-DESIGN-GUIDE.md`.** Non-negotiable summary:
+**Full details in `.github/UI-DESIGN-GUIDE.md`.** Non-negotiable summary:
 
 1. **Always use `setImage`**, never `setTitle` alone.
 2. **Use the accent bar pattern** — 6px colored bar at top.
@@ -205,8 +205,8 @@ Whenever you make changes that affect the project:
 - Update `README.md` (features, scripts, structure, etc.)
 - Update `CONTRIBUTING.md` if development workflow changes.
 - Update this file (`AGENTS.md`) if architecture or conventions change.
-- Update `UI-DESIGN-GUIDE.md` if visual patterns or discoveries change.
-- Update `TESTING-PROTOCOL.md` if testing patterns or pitfalls change.
+- Update `.github/UI-DESIGN-GUIDE.md` if visual patterns or discoveries change.
+- Update `.github/TESTING-PROTOCOL.md` if testing patterns or pitfalls change.
 - Update `SKILLS.md` if new raw research or SDK findings are discovered.
 
 ---

@@ -20,6 +20,7 @@ import streamDeck, {
 import { CloudflareApiClient } from "../services/cloudflare-api-client";
 import { renderKeyImage, STATUS_COLORS } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
+import { getPollingCoordinator } from "../services/polling-coordinator";
 
 /**
  * Cloudflare Status action - displays the current Cloudflare system status
@@ -28,14 +29,13 @@ import { MarqueeController } from "../services/marquee-controller";
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.status" })
 export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> {
   private apiClient: CloudflareApiClient;
-  private refreshInterval: ReturnType<typeof setInterval> | null = null;
 
   /** Consecutive error count for exponential backoff */
   private consecutiveErrors = 0;
   /** Maximum backoff multiplier (caps at 2^5 = 32x the base interval) */
   private static readonly MAX_BACKOFF_EXPONENT = 5;
-  /** Number of polls to skip (set by backoff logic) */
-  private skipCount = 0;
+  /** Timestamp until which coordinator ticks should be skipped (backoff) */
+  private skipUntil = 0;
 
   /** Marquee tick interval in milliseconds. */
   private static readonly MARQUEE_INTERVAL_MS = 500;
@@ -46,7 +46,7 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
   /** Interval handle for the marquee animation timer. */
   private marqueeInterval: ReturnType<typeof setInterval> | null = null;
 
-  /** Stored event reference for marquee re-rendering. */
+  /** Stored event reference for marquee re-rendering and coordinator tick. */
   private lastEvent: WillAppearEvent<CloudflareStatusSettings>
     | KeyDownEvent<CloudflareStatusSettings>
     | DidReceiveSettingsEvent<CloudflareStatusSettings>
@@ -55,6 +55,9 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
   /** Last rendered image parameters for marquee re-rendering. */
   private lastRenderParams: { line2: string; statusColor: string } | null = null;
 
+  /** Unsubscribe function for the polling coordinator. */
+  private unsubscribeCoordinator: (() => void) | null = null;
+
   constructor(apiClient?: CloudflareApiClient) {
     super();
     this.apiClient = apiClient ?? new CloudflareApiClient();
@@ -62,33 +65,26 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
 
   /**
    * Called when the action appears on the Stream Deck.
-   * Sets up periodic status refresh.
+   * Subscribes to the polling coordinator and fetches status immediately.
    */
   override async onWillAppear(ev: WillAppearEvent<CloudflareStatusSettings>): Promise<void> {
-    const settings = ev.payload.settings;
-    const refreshIntervalMs = (settings.refreshIntervalSeconds ?? 60) * 1000;
+    this.lastEvent = ev;
 
     // Fetch status immediately
     await this.updateStatus(ev);
 
-    // Set up periodic refresh (with backoff-aware tick)
-    this.refreshInterval = setInterval(async () => {
-      if (this.skipCount > 0) {
-        this.skipCount--;
-        return;
-      }
-      await this.updateStatus(ev);
-    }, refreshIntervalMs);
+    // Subscribe to the shared polling coordinator
+    this.subscribeToCoordinator();
   }
 
   /**
    * Called when the action disappears from the Stream Deck.
-   * Cleans up the refresh interval.
+   * Cleans up the coordinator subscription.
    */
   override onWillDisappear(): void {
-    if (this.refreshInterval) {
-      clearInterval(this.refreshInterval);
-      this.refreshInterval = null;
+    if (this.unsubscribeCoordinator) {
+      this.unsubscribeCoordinator();
+      this.unsubscribeCoordinator = null;
     }
     this.stopMarqueeTimer();
     this.marquee.setText("");
@@ -98,31 +94,14 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
 
   /**
    * Called when settings change from the Property Inspector.
-   * Restarts polling with the new settings.
+   * Fetches immediately with new settings.
    */
   override async onDidReceiveSettings(
     ev: DidReceiveSettingsEvent<CloudflareStatusSettings>
   ): Promise<void> {
-    // Clear existing interval
-    if (this.refreshInterval) {
-      clearInterval(this.refreshInterval);
-      this.refreshInterval = null;
-    }
-
-    const settings = ev.payload.settings;
-    const refreshIntervalMs = (settings.refreshIntervalSeconds ?? 60) * 1000;
-
+    this.lastEvent = ev;
     // Fetch immediately with new settings
     await this.updateStatus(ev);
-
-    // Restart periodic refresh (with backoff-aware tick)
-    this.refreshInterval = setInterval(async () => {
-      if (this.skipCount > 0) {
-        this.skipCount--;
-        return;
-      }
-      await this.updateStatus(ev);
-    }, refreshIntervalMs);
   }
 
   /**
@@ -131,7 +110,7 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
    */
   override async onKeyDown(ev: KeyDownEvent<CloudflareStatusSettings>): Promise<void> {
     this.consecutiveErrors = 0;
-    this.skipCount = 0;
+    this.skipUntil = 0;
     await this.updateStatus(ev);
   }
 
@@ -194,18 +173,19 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
       }
       // Success — reset backoff
       this.consecutiveErrors = 0;
-      this.skipCount = 0;
+      this.skipUntil = 0;
     } catch (error) {
       streamDeck.logger.error("Failed to fetch Cloudflare status:", error);
 
-      // Exponential backoff: skip 2^n - 1 polls before retrying
+      // Exponential backoff: delay retries using skipUntil timestamp
       this.consecutiveErrors = Math.min(
         this.consecutiveErrors + 1,
         CloudflareStatus.MAX_BACKOFF_EXPONENT
       );
-      this.skipCount = Math.pow(2, this.consecutiveErrors) - 1;
+      const backoffMs = Math.pow(2, this.consecutiveErrors) * getPollingCoordinator().intervalMs;
+      this.skipUntil = Date.now() + backoffMs;
       streamDeck.logger.info(
-        `Backoff: skipping next ${this.skipCount} poll(s) after ${this.consecutiveErrors} consecutive error(s)`
+        `Backoff: skipping polls for ${Math.round(backoffMs / 1000)}s after ${this.consecutiveErrors} consecutive error(s)`
       );
 
       this.lastRenderParams = { line2: "ERR", statusColor: STATUS_COLORS.red };
@@ -294,6 +274,23 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
   }
 
   /**
+   * Subscribes to the shared polling coordinator for periodic refreshes.
+   */
+  private subscribeToCoordinator(): void {
+    if (this.unsubscribeCoordinator) return; // already subscribed
+
+    this.unsubscribeCoordinator = getPollingCoordinator().subscribe(
+      "com.pedrofuentes.cloudflare-utilities.status",
+      async () => {
+        // Skip if in backoff
+        if (Date.now() < this.skipUntil) return;
+        if (!this.lastEvent) return;
+        await this.updateStatus(this.lastEvent);
+      },
+    );
+  }
+
+  /**
    * Starts the marquee animation interval if the component name is too
    * long for the key display.
    */
@@ -339,8 +336,6 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
  * Settings for the Cloudflare Status action.
  */
 type CloudflareStatusSettings = {
-  /** Refresh interval in seconds (default: 60) */
-  refreshIntervalSeconds?: number;
   /** Component ID to monitor (empty = overall status) */
   componentId?: string;
   /** Component display name (for rendering) */

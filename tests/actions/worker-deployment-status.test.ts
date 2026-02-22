@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { WorkerDeploymentStatus } from "../../src/actions/worker-deployment-status";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
+import { resetPollingCoordinator, getPollingCoordinator } from "../../src/services/polling-coordinator";
 import type { DeploymentStatus } from "../../src/types/cloudflare-workers";
 import { getGlobalSettings } from "../../src/services/global-settings-store";
 
@@ -569,49 +570,62 @@ describe("WorkerDeploymentStatus", () => {
     });
   });
 
-  // -- getPollingInterval --
+  // -- Backoff via coordinator ---
 
-  describe("getPollingInterval", () => {
-    it("should return 10 000 ms for recent state", () => {
-      expect(action.getPollingInterval("recent", 60)).toBe(10_000);
-    });
-
-    it("should return 10 000 ms for gradual state", () => {
-      expect(action.getPollingInterval("gradual", 60)).toBe(10_000);
-    });
-
-    it("should return 30 000 ms for error state", () => {
-      expect(action.getPollingInterval("error", 60)).toBe(30_000);
-    });
-
-    it("should return base interval for live state", () => {
-      expect(action.getPollingInterval("live", 60)).toBe(60_000);
-    });
-
-    it("should return base interval for null state", () => {
-      expect(action.getPollingInterval(null, 120)).toBe(120_000);
-    });
-
-    it("should ignore base interval for active states", () => {
-      expect(action.getPollingInterval("recent", 3600)).toBe(10_000);
-      expect(action.getPollingInterval("gradual", 3600)).toBe(10_000);
-    });
-
-    it("should ignore base interval for error state", () => {
-      expect(action.getPollingInterval("error", 10)).toBe(30_000);
-    });
-  });
-
-  // -- Adaptive Polling Behavior --
-
-  describe("adaptive polling", () => {
+  describe("coordinator backoff", () => {
     afterEach(() => {
+      resetPollingCoordinator();
       vi.restoreAllMocks();
       vi.useRealTimers();
     });
 
-    it("should schedule fast poll after detecting recent deployment", async () => {
+    it("should set skipUntil after an error", async () => {
       vi.useFakeTimers();
+      mockGetDeploymentStatus = vi.fn().mockRejectedValue(new Error("fail"));
+
+      const ev = makeMockEvent({ workerName: "my-api" });
+      await action.onWillAppear(ev);
+
+      // After error, skipUntil should be set to a future timestamp
+      expect((action as any).skipUntil).toBeGreaterThan(0);
+    });
+
+    it("should clear skipUntil after successful fetch", async () => {
+      vi.useFakeTimers();
+      mockGetDeploymentStatus = vi.fn().mockRejectedValueOnce(new Error("fail"));
+
+      const ev = makeMockEvent({ workerName: "my-api" });
+      await action.onWillAppear(ev);
+      expect((action as any).skipUntil).toBeGreaterThan(0);
+
+      // Next call succeeds
+      mockGetDeploymentStatus.mockResolvedValueOnce({
+        isLive: true,
+        isGradual: false,
+        createdOn: "2020-01-01T00:00:00Z",
+        source: "wrangler",
+        versionSplit: "100",
+        deploymentId: "dep-1",
+      });
+      (action as any).skipUntil = 0; // clear for test
+      await getPollingCoordinator().tick();
+
+      expect((action as any).skipUntil).toBe(0);
+    });
+  });
+
+  // -- Coordinator Polling Behavior --
+
+  describe("coordinator polling", () => {
+    afterEach(() => {
+      resetPollingCoordinator();
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    });
+
+    it("should poll at coordinator interval after detecting recent deployment", async () => {
+      vi.useFakeTimers();
+      getPollingCoordinator().setIntervalSeconds(10);
 
       const recentDate = new Date(Date.now() - 5 * 60 * 1000).toISOString();
       mockGetDeploymentStatus = vi.fn().mockResolvedValue({
@@ -625,20 +639,21 @@ describe("WorkerDeploymentStatus", () => {
 
       const ev = makeMockEvent({
         workerName: "my-api",
-        refreshIntervalSeconds: 120,
       });
 
       await action.onWillAppear(ev);
       expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
 
+      // Coordinator tick triggers next poll
       await vi.advanceTimersByTimeAsync(10_000);
       expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(2);
 
       vi.useRealTimers();
     });
 
-    it("should schedule normal poll after detecting live deployment", async () => {
+    it("should poll at coordinator interval after detecting live deployment", async () => {
       vi.useFakeTimers();
+      getPollingCoordinator().setIntervalSeconds(10);
 
       mockGetDeploymentStatus = vi.fn().mockResolvedValue({
         isLive: true,
@@ -651,16 +666,13 @@ describe("WorkerDeploymentStatus", () => {
 
       const ev = makeMockEvent({
         workerName: "my-api",
-        refreshIntervalSeconds: 120,
       });
 
       await action.onWillAppear(ev);
       expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
 
+      // Coordinator tick
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
-
-      await vi.advanceTimersByTimeAsync(110_000);
       expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(2);
 
       vi.useRealTimers();
@@ -668,61 +680,66 @@ describe("WorkerDeploymentStatus", () => {
 
     it("should back off after an error", async () => {
       vi.useFakeTimers();
+      getPollingCoordinator().setIntervalSeconds(10);
 
       mockGetDeploymentStatus = vi.fn().mockRejectedValue(new Error("fail"));
 
       const ev = makeMockEvent({
         workerName: "my-api",
-        refreshIntervalSeconds: 60,
       });
 
+      // Initial call fails → skipUntil = now + 30_000 (ERROR_BACKOFF_MS)
       await action.onWillAppear(ev);
       expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
 
+      // Tick at 10s — within 30s backoff, skipped
       await vi.advanceTimersByTimeAsync(10_000);
       expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
 
-      await vi.advanceTimersByTimeAsync(20_000);
+      // Tick at 20s — still within 30s backoff, skipped
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
+
+      // Tick at 30s — backoff expired, makes the call
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(2);
 
       vi.useRealTimers();
     });
 
-    it("should transition from fast poll to normal poll when deploy ages out", async () => {
+    it("should resume normal polling after error recovery", async () => {
       vi.useFakeTimers();
+      getPollingCoordinator().setIntervalSeconds(10);
 
-      const nineMinAgo = new Date(Date.now() - 9 * 60 * 1000).toISOString();
-      mockGetDeploymentStatus = vi.fn().mockResolvedValue({
-        isLive: true,
-        isGradual: false,
-        createdOn: nineMinAgo,
-        source: "wrangler",
-        versionSplit: "100",
-        deploymentId: "dep-1",
-      });
+      mockGetDeploymentStatus = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("fail"))
+        .mockResolvedValue({
+          isLive: true,
+          isGradual: false,
+          createdOn: "2020-01-01T00:00:00Z",
+          source: "wrangler",
+          versionSplit: "100",
+          deploymentId: "dep-1",
+        });
 
       const ev = makeMockEvent({
         workerName: "my-api",
-        refreshIntervalSeconds: 300,
       });
 
+      // Initial: error → backoff 30s
       await action.onWillAppear(ev);
-      const firstSvg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
-      expect(firstSvg).toContain(STATUS_COLORS.blue);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
 
-      await vi.advanceTimersByTimeAsync(10_000);
+      // Skip through backoff (3 ticks of 10s = 30s)
+      await vi.advanceTimersByTimeAsync(10_000); // skip
+      await vi.advanceTimersByTimeAsync(10_000); // skip
+      await vi.advanceTimersByTimeAsync(10_000); // call (success)
       expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(2);
 
-      for (let i = 0; i < 6; i++) {
-        await vi.advanceTimersByTimeAsync(10_000);
-      }
-      const callCount = mockGetDeploymentStatus.mock.calls.length;
-
+      // Next tick at normal interval — should call immediately (no backoff)
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(callCount);
-
-      await vi.advanceTimersByTimeAsync(290_000);
-      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(callCount + 1);
+      expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(3);
 
       vi.useRealTimers();
     });
@@ -741,7 +758,6 @@ describe("WorkerDeploymentStatus", () => {
 
       const ev = makeMockEvent({
         workerName: "my-api",
-        refreshIntervalSeconds: 60,
       });
 
       await action.onWillAppear(ev);

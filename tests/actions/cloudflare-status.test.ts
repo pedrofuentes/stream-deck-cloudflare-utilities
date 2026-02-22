@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { CloudflareStatus } from "../../src/actions/cloudflare-status";
 import { CloudflareApiClient } from "../../src/services/cloudflare-api-client";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
+import { resetPollingCoordinator, getPollingCoordinator } from "../../src/services/polling-coordinator";
 import type { CloudflareComponent } from "../../src/types/cloudflare";
 
 // Mock the @elgato/streamdeck module
@@ -496,12 +497,14 @@ describe("CloudflareStatus", () => {
 
   describe("error backoff", () => {
     afterEach(() => {
+      resetPollingCoordinator();
       vi.restoreAllMocks();
       vi.useRealTimers();
     });
 
     it("should skip polls after first error (skip 1)", async () => {
       vi.useFakeTimers();
+      getPollingCoordinator().setIntervalSeconds(10);
 
       const mockClient = {
         getSystemStatus: vi
@@ -511,18 +514,18 @@ describe("CloudflareStatus", () => {
       } as unknown as CloudflareApiClient;
 
       const action = new CloudflareStatus(mockClient);
-      const ev = makeMockEvent({ refreshIntervalSeconds: 60 });
+      const ev = makeMockEvent({});
 
-      // Initial call — fails (consecutiveErrors = 1, skipCount = 1)
+      // Initial call — fails (consecutiveErrors = 1, backoff = 2 * 10s = 20s)
       await action.onWillAppear(ev);
       expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(1);
 
-      // First tick — skipped (skipCount 1 → 0)
-      await vi.advanceTimersByTimeAsync(60_000);
+      // First coordinator tick at 10s — within backoff (20s), skipped
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(1); // still 1
 
-      // Second tick — skipCount is 0, makes the call (succeeds)
-      await vi.advanceTimersByTimeAsync(60_000);
+      // Second coordinator tick at 20s — backoff expired, makes the call
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(2);
 
       vi.useRealTimers();
@@ -530,28 +533,28 @@ describe("CloudflareStatus", () => {
 
     it("should increase backoff exponentially on consecutive errors", async () => {
       vi.useFakeTimers();
+      getPollingCoordinator().setIntervalSeconds(10);
 
       const mockClient = {
         getSystemStatus: vi.fn().mockRejectedValue(new Error("403")),
       } as unknown as CloudflareApiClient;
 
       const action = new CloudflareStatus(mockClient);
-      const ev = makeMockEvent({ refreshIntervalSeconds: 10 });
+      const ev = makeMockEvent({});
 
-      // Initial call — error #1, skipCount = 1
+      const coordinator = getPollingCoordinator();
+
+      // Initial call — error #1, backoff = 2 * 10s = 20s (skip 2 ticks)
       await action.onWillAppear(ev);
       expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(1);
 
-      // Skip 1, then retry — error #2, skipCount = 3
+      // Skip 2 ticks (20s), then retry — error #2, backoff = 4 * 10s = 40s
       await vi.advanceTimersByTimeAsync(10_000); // skip
       await vi.advanceTimersByTimeAsync(10_000); // call
       expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(2);
 
-      // Skip 3, then retry — error #3, skipCount = 7
-      await vi.advanceTimersByTimeAsync(10_000); // skip
-      await vi.advanceTimersByTimeAsync(10_000); // skip
-      await vi.advanceTimersByTimeAsync(10_000); // skip
-      await vi.advanceTimersByTimeAsync(10_000); // call
+      // Skip 4 ticks (40s), then retry — error #3, backoff = 8 * 10s = 80s
+      for (let i = 0; i < 4; i++) await vi.advanceTimersByTimeAsync(10_000);
       expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(3);
 
       vi.useRealTimers();
@@ -559,6 +562,7 @@ describe("CloudflareStatus", () => {
 
     it("should cap backoff at MAX_BACKOFF_EXPONENT (32x)", async () => {
       vi.useFakeTimers();
+      getPollingCoordinator().setIntervalSeconds(1);
 
       let callCount = 0;
       const mockClient = {
@@ -569,44 +573,36 @@ describe("CloudflareStatus", () => {
       } as unknown as CloudflareApiClient;
 
       const action = new CloudflareStatus(mockClient);
-      const ev = makeMockEvent({ refreshIntervalSeconds: 1 });
+      const ev = makeMockEvent({});
 
-      // Initial call — error #1, skip=1
+      const coordinator = getPollingCoordinator();
+
+      // Initial call — error #1, backoff = 2 * 1s = 2s
       await action.onWillAppear(ev);
       expect(callCount).toBe(1);
 
-      // Error #2: skip 1, call → skip=3
-      await vi.advanceTimersByTimeAsync(1_000); // skip
-      await vi.advanceTimersByTimeAsync(1_000); // call
+      // Error #2: skip 2 ticks, call → backoff = 4s
+      for (let i = 0; i < 2; i++) await vi.advanceTimersByTimeAsync(1_000);
       expect(callCount).toBe(2);
 
-      // Error #3: skip 3, call → skip=7
-      for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(1_000);
-      await vi.advanceTimersByTimeAsync(1_000); // call
+      // Error #3: skip 4 ticks, call → backoff = 8s
+      for (let i = 0; i < 4; i++) await vi.advanceTimersByTimeAsync(1_000);
       expect(callCount).toBe(3);
 
-      // Error #4: skip 7, call → skip=15
-      for (let i = 0; i < 7; i++) await vi.advanceTimersByTimeAsync(1_000);
-      await vi.advanceTimersByTimeAsync(1_000); // call
+      // Error #4: skip 8 ticks, call → backoff = 16s
+      for (let i = 0; i < 8; i++) await vi.advanceTimersByTimeAsync(1_000);
       expect(callCount).toBe(4);
 
-      // Error #5: skip 15, call → skip=31 (capped)
-      for (let i = 0; i < 15; i++) await vi.advanceTimersByTimeAsync(1_000);
-      await vi.advanceTimersByTimeAsync(1_000); // call
+      // Error #5: skip 16 ticks, call → backoff = 32s (capped, exponent=5)
+      for (let i = 0; i < 16; i++) await vi.advanceTimersByTimeAsync(1_000);
       expect(callCount).toBe(5);
 
-      // Error #6: skip should still be 31 (capped at 2^5-1)
-      for (let i = 0; i < 31; i++) await vi.advanceTimersByTimeAsync(1_000);
-      expect(callCount).toBe(5); // still 5 during skips
-
-      await vi.advanceTimersByTimeAsync(1_000); // call
+      // Error #6: skip 32 ticks = capped
+      for (let i = 0; i < 32; i++) await vi.advanceTimersByTimeAsync(1_000);
       expect(callCount).toBe(6);
 
-      // Error #7: skip should still be 31 (doesn't grow beyond cap)
-      for (let i = 0; i < 31; i++) await vi.advanceTimersByTimeAsync(1_000);
-      expect(callCount).toBe(6); // still 6 during skips
-
-      await vi.advanceTimersByTimeAsync(1_000); // call
+      // Error #7: still 32 ticks (doesn't grow beyond cap)
+      for (let i = 0; i < 32; i++) await vi.advanceTimersByTimeAsync(1_000);
       expect(callCount).toBe(7);
 
       vi.useRealTimers();
@@ -614,6 +610,7 @@ describe("CloudflareStatus", () => {
 
     it("should reset backoff on successful fetch", async () => {
       vi.useFakeTimers();
+      getPollingCoordinator().setIntervalSeconds(10);
 
       const mockClient = {
         getSystemStatus: vi
@@ -626,28 +623,25 @@ describe("CloudflareStatus", () => {
       } as unknown as CloudflareApiClient;
 
       const action = new CloudflareStatus(mockClient);
-      const ev = makeMockEvent({ refreshIntervalSeconds: 10 });
+      const ev = makeMockEvent({});
 
-      // Initial: error #1, skip=1
+      // Initial: error #1, backoff = 2 * 10s = 20s
       await action.onWillAppear(ev);
 
-      // Skip 1, retry: error #2, skip=3
+      // Skip 2 ticks, retry: error #2, backoff = 4 * 10s = 40s
       await vi.advanceTimersByTimeAsync(10_000);
       await vi.advanceTimersByTimeAsync(10_000);
       expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(2);
 
-      // Skip 3, retry: success → reset backoff
-      await vi.advanceTimersByTimeAsync(10_000);
-      await vi.advanceTimersByTimeAsync(10_000);
-      await vi.advanceTimersByTimeAsync(10_000);
-      await vi.advanceTimersByTimeAsync(10_000);
+      // Skip 4 ticks, retry: success → reset backoff
+      for (let i = 0; i < 4; i++) await vi.advanceTimersByTimeAsync(10_000);
       expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(3);
 
-      // Next tick should call immediately (skip=0 after reset)
+      // Next tick should call immediately (backoff reset)
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(4); // error again, but skip=1 (reset to #1)
+      expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(4); // error again, but backoff = 2*10s
 
-      // Only skip 1 (not 7 which would be if it was error #3)
+      // Only skip 2 ticks (backoff=20s, not 80s which would be if it was error #3)
       await vi.advanceTimersByTimeAsync(10_000); // skip
       await vi.advanceTimersByTimeAsync(10_000); // call
       expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(5);
@@ -657,6 +651,7 @@ describe("CloudflareStatus", () => {
 
     it("should reset backoff on key press", async () => {
       vi.useFakeTimers();
+      getPollingCoordinator().setIntervalSeconds(10);
 
       const mockClient = {
         getSystemStatus: vi
@@ -667,9 +662,9 @@ describe("CloudflareStatus", () => {
       } as unknown as CloudflareApiClient;
 
       const action = new CloudflareStatus(mockClient);
-      const ev = makeMockEvent({ refreshIntervalSeconds: 10 });
+      const ev = makeMockEvent({});
 
-      // Initial: error #1, skip=1
+      // Initial: error #1, backoff = 2 * 10s = 20s
       await action.onWillAppear(ev);
       expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(1);
 
@@ -677,13 +672,12 @@ describe("CloudflareStatus", () => {
       await action.onKeyDown(ev);
       expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(2);
 
-      // Even though key press errored, skip should be 1 (reset before fetch)
-      // ... but the fetch itself errored, so consecutiveErrors=1, skip=1
-      // Next tick: skip
+      // Key press errored → consecutiveErrors=1, backoff=20s
+      // Next tick: skip (within 20s backoff)
       await vi.advanceTimersByTimeAsync(10_000);
       expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(2);
 
-      // Tick after: call succeeds
+      // Tick after: backoff expired, call succeeds
       await vi.advanceTimersByTimeAsync(10_000);
       expect(mockClient.getSystemStatus).toHaveBeenCalledTimes(3);
 

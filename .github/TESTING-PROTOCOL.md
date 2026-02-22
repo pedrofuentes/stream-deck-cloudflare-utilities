@@ -866,4 +866,4 @@ When you discover new testing patterns or pitfalls:
 1. Add to the relevant section above
 2. Add pitfalls to [section 15](#15-common-pitfalls)
 3. Add reusable recipes to [section 16](#16-test-recipe-catalog)
-4. Reference `AGENTS.md` for project rules and `UI-DESIGN-GUIDE.md` for visual specs
+4. Reference `AGENTS.md` for project rules and `.github/UI-DESIGN-GUIDE.md` for visual specs
