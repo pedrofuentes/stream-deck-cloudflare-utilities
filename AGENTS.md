@@ -53,7 +53,8 @@ npm run test:coverage # Generate coverage report
 npm run build         # Build with Rollup
 npm run lint          # TypeScript type-check (no emit)
 npm run validate      # Validate plugin with Stream Deck CLI
-npm run pack          # Full build + package (runs tests first via prepack)
+npm run validate:consistency  # Check actions/manifest/PI/icons/tests/docs are in sync
+npm run pack          # Full build + package (runs tests + lint + consistency first via prepack)
 ```
 
 ### 4. Release Packaging
@@ -71,20 +72,21 @@ This runs `prepack` (test + lint), then `build`, then `streamdeck pack` to produ
 #### Automated checks (agent runs these)
 1. `npm test` — all tests pass.
 2. `npm run lint` — no TypeScript errors.
-3. `npm run build` — successful Rollup build.
-4. `npm run validate` — Stream Deck CLI manifest/schema validation passes.
-5. `streamdeck restart com.pedrofuentes.cloudflare-utilities` — plugin hot-reloads in Stream Deck without crash.
+3. `npm run validate:consistency` — all actions, manifest, PI, icons, tests, and docs are in sync.
+4. `npm run build` — successful Rollup build.
+5. `npm run validate` — Stream Deck CLI manifest/schema validation passes.
+6. `streamdeck restart com.pedrofuentes.cloudflare-utilities` — plugin hot-reloads in Stream Deck without crash.
 
 #### Manual device test (user performs this)
-6. **ASK the user to test on their physical Stream Deck.** The agent must explicitly prompt:
+7. **ASK the user to test on their physical Stream Deck.** The agent must explicitly prompt:
    > "Before I tag and release, please test the plugin on your Stream Deck and confirm everything works. Specifically, please verify: [list what changed]."
-7. **Provide a numbered, step-by-step manual test flow** covering every new feature or bug fix in the release. Each step must be concrete and actionable (e.g., "Add Worker Analytics action to a key → open PI → select a worker → verify the key shows request count"). Include:
+8. **Provide a numbered, step-by-step manual test flow** covering every new feature or bug fix in the release. Each step must be concrete and actionable (e.g., "Add Worker Analytics action to a key → open PI → select a worker → verify the key shows request count"). Include:
    - **Setup steps** (add action to key, configure PI settings)
    - **Happy-path verification** (expected display, colors, values)
    - **Interaction tests** (key press behavior, metric cycling, dropdown changes)
    - **Edge-case checks** (long names for marquee, missing credentials, empty data)
    - **Regression checks** for existing actions that may be affected by the change
-8. **Wait for explicit user confirmation** before proceeding to version bump / tag / push / release.
+9. **Wait for explicit user confirmation** before proceeding to version bump / tag / push / release.
 
 #### Why the CLI alone is NOT enough
 - `streamdeck validate` only checks the manifest JSON schema — it does **not** test runtime behavior, UI rendering, API calls, or key display.
@@ -119,8 +121,12 @@ src/
 ├── types/            # TypeScript interfaces and type definitions
 └── plugin.ts         # Entry point - registers actions, connects to SD
 
+scripts/              # Build & validation scripts
+└── validate-consistency.ts  # Plugin consistency validator
+
 tests/                # Mirrors src/ structure
 ├── actions/
+├── scripts/
 ├── services/
 └── types/
 
