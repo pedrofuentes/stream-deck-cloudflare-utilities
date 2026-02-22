@@ -19,7 +19,7 @@ import streamDeck, {
 
 import { CloudflareWorkersApi, formatTimeAgo, truncateWorkerName } from "../services/cloudflare-workers-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
-import { renderKeyImage, renderPlaceholderImage, STATUS_COLORS } from "../services/key-image-renderer";
+import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
 import type { DeploymentStatus } from "../types/cloudflare-workers";
@@ -48,7 +48,8 @@ type StatusState = "live" | "gradual" | "recent" | "error";
  * - 🔵 Blue   → recently deployed (< 10 min)
  * - 🔴 Red    → error fetching status
  *
- * When not yet configured, the key shows "..." as a passive placeholder.
+ * When API credentials are missing, the key shows "Please Setup".
+ * When only the worker name is missing, the key shows "..." as a passive placeholder.
  * All configuration is done through the Property Inspector.
  */
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.worker-deployment-status" })
@@ -102,6 +103,11 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
+    if (!this.hasCredentials(global)) {
+      await ev.action.setImage(renderSetupImage());
+      return;
+    }
+
     if (!this.hasRequiredSettings(settings, global)) {
       await ev.action.setImage(renderPlaceholderImage());
       return;
@@ -132,6 +138,11 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
 
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
+
+    if (!this.hasCredentials(global)) {
+      await ev.action.setImage(renderSetupImage());
+      return;
+    }
 
     if (!this.hasRequiredSettings(settings, global)) {
       await ev.action.setImage(renderPlaceholderImage());
@@ -314,7 +325,15 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   }
 
   /**
-   * Checks whether the required settings are present.
+   * Checks whether API credentials (apiToken + accountId) are present.
+   */
+  private hasCredentials(global?: { apiToken?: string; accountId?: string }): boolean {
+    const g = global ?? getGlobalSettings();
+    return !!(g.apiToken && g.accountId);
+  }
+
+  /**
+   * Checks whether all required settings (credentials + worker name) are present.
    */
   private hasRequiredSettings(settings: WorkerDeploymentSettings, global?: { apiToken?: string; accountId?: string }): boolean {
     const g = global ?? getGlobalSettings();
@@ -415,6 +434,11 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       const ev = this.lastEvent;
       const settings = ev.payload.settings;
       const global = getGlobalSettings();
+
+      if (!this.hasCredentials(global)) {
+        await ev.action.setImage(renderSetupImage());
+        return;
+      }
 
       if (!this.hasRequiredSettings(settings, global)) {
         await ev.action.setImage(renderPlaceholderImage());

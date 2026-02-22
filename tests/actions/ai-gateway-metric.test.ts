@@ -421,8 +421,18 @@ describe("AiGatewayMetric", () => {
   // ── onWillAppear ───────────────────────────────────────────────────────
 
   describe("onWillAppear", () => {
-    it("should show placeholder when settings are incomplete", async () => {
+    it("should show setup image when credentials are missing", async () => {
       vi.mocked(getGlobalSettings).mockReturnValue({});
+      const ev = makeMockEvent({});
+      await action.onWillAppear(ev);
+
+      expect(ev.action.setImage).toHaveBeenCalledTimes(1);
+      const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
+      expect(svg).toContain("Setup");
+      expect(svg).toContain("Please");
+    });
+
+    it("should show placeholder when credentials present but gatewayId missing", async () => {
       const ev = makeMockEvent({});
       await action.onWillAppear(ev);
 
@@ -547,8 +557,17 @@ describe("AiGatewayMetric", () => {
   // ── onDidReceiveSettings ───────────────────────────────────────────────
 
   describe("onDidReceiveSettings", () => {
-    it("should show placeholder when settings become incomplete", async () => {
+    it("should show setup image when credentials become missing", async () => {
       vi.mocked(getGlobalSettings).mockReturnValue({});
+      const ev = makeMockEvent({});
+      await action.onDidReceiveSettings(ev);
+
+      const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
+      expect(svg).toContain("Setup");
+      expect(svg).toContain("Please");
+    });
+
+    it("should show placeholder when credentials present but gatewayId becomes missing", async () => {
       const ev = makeMockEvent({});
       await action.onDidReceiveSettings(ev);
 
@@ -576,14 +595,15 @@ describe("AiGatewayMetric", () => {
       const ev1 = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev1);
 
-      // Now change settings to incomplete
+      // Now change settings to incomplete (credentials removed)
       vi.mocked(getGlobalSettings).mockReturnValue({});
       const ev2 = makeMockEvent({});
       await action.onDidReceiveSettings(ev2);
 
-      // Placeholder shown
+      // Setup image shown when credentials are missing
       const svg = decodeSvg(ev2.action.setImage.mock.calls[0][0]);
-      expect(svg).toContain("...");
+      expect(svg).toContain("Setup");
+      expect(svg).toContain("Please");
     });
 
     it("should reuse cached metrics when only display metric changes", async () => {

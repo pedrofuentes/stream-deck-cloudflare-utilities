@@ -124,6 +124,33 @@ export function renderPlaceholderImage(text = "..."): string {
 }
 
 /**
+ * Renders a "Please Setup" key image for actions where API credentials
+ * (API Token / Account ID) have not been configured yet.
+ *
+ * Uses the standard accent bar pattern with a gray bar to indicate
+ * an inactive / unconfigured state.
+ *
+ * Layout:
+ *   ┌════════════════════════┐  ← gray accent bar (6 px)
+ *   │                        │
+ *   │     Please (18px)      │  ← dimmed, centered
+ *   │                        │
+ *   │     Setup (30px)       │  ← bold, white, centered
+ *   │                        │
+ *   └────────────────────────┘
+ */
+export function renderSetupImage(): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
+  <rect width="144" height="144" rx="16" fill="${BG_COLOR}"/>
+  <rect y="0" width="144" height="6" rx="3" fill="${STATUS_COLORS.gray}"/>
+  <text x="72" y="56" text-anchor="middle" fill="${TEXT_SECONDARY}" font-size="18" font-family="Arial,Helvetica,sans-serif">Please</text>
+  <text x="72" y="100" text-anchor="middle" fill="${TEXT_PRIMARY}" font-size="30" font-weight="bold" font-family="Arial,Helvetica,sans-serif">Setup</text>
+</svg>`;
+
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+/**
  * Escapes special XML characters in a string for safe SVG embedding.
  */
 export function escapeXml(str: string): string {

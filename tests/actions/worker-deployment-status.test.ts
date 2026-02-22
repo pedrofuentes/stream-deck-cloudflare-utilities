@@ -299,25 +299,27 @@ describe("WorkerDeploymentStatus", () => {
       vi.useRealTimers();
     });
 
-    it("should show placeholder when apiToken is missing", async () => {
+    it("should show setup image when apiToken is missing", async () => {
       vi.mocked(getGlobalSettings).mockReturnValue({ accountId: "acc" });
       const ev = makeMockEvent({ workerName: "w" });
       await action.onWillAppear(ev);
       expect(ev.action.setImage).toHaveBeenCalledTimes(1);
       const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
-      expect(svg).toContain("...");
+      expect(svg).toContain("Setup");
+      expect(svg).toContain("Please");
     });
 
-    it("should show placeholder when accountId is missing", async () => {
+    it("should show setup image when accountId is missing", async () => {
       vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "tok" });
       const ev = makeMockEvent({ workerName: "w" });
       await action.onWillAppear(ev);
       expect(ev.action.setImage).toHaveBeenCalledTimes(1);
       const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
-      expect(svg).toContain("...");
+      expect(svg).toContain("Setup");
+      expect(svg).toContain("Please");
     });
 
-    it("should show placeholder when workerName is missing", async () => {
+    it("should show placeholder when workerName is missing but credentials present", async () => {
       const ev = makeMockEvent({});
       await action.onWillAppear(ev);
       expect(ev.action.setImage).toHaveBeenCalledTimes(1);
@@ -325,13 +327,14 @@ describe("WorkerDeploymentStatus", () => {
       expect(svg).toContain("...");
     });
 
-    it("should show placeholder when all settings are empty", async () => {
+    it("should show setup image when all settings are empty", async () => {
       vi.mocked(getGlobalSettings).mockReturnValue({});
       const ev = makeMockEvent({});
       await action.onWillAppear(ev);
       expect(ev.action.setImage).toHaveBeenCalledTimes(1);
       const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
-      expect(svg).toContain("...");
+      expect(svg).toContain("Setup");
+      expect(svg).toContain("Please");
     });
 
     it("should fetch status and set image when settings are complete", async () => {
@@ -409,15 +412,17 @@ describe("WorkerDeploymentStatus", () => {
       vi.useRealTimers();
     });
 
-    it("should show placeholder when new settings are incomplete", async () => {
+    it("should show setup image when new settings have no credentials", async () => {
+      vi.mocked(getGlobalSettings).mockReturnValue({});
       const ev = makeMockEvent({});
       await action.onDidReceiveSettings(ev);
       expect(ev.action.setImage).toHaveBeenCalledTimes(1);
       const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
-      expect(svg).toContain("...");
+      expect(svg).toContain("Setup");
+      expect(svg).toContain("Please");
     });
 
-    it("should show placeholder when new settings are empty", async () => {
+    it("should show placeholder when credentials present but workerName missing", async () => {
       const ev = makeMockEvent({});
       await action.onDidReceiveSettings(ev);
       expect(ev.action.setImage).toHaveBeenCalledTimes(1);

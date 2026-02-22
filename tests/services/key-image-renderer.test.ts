@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import {
   renderKeyImage,
   renderPlaceholderImage,
+  renderSetupImage,
   escapeXml,
   STATUS_COLORS,
   BG_COLOR,
@@ -264,6 +265,64 @@ describe("key-image-renderer", () => {
     it("should handle empty string", () => {
       const svg = decodeSvg(renderPlaceholderImage(""));
       expect(svg).toContain("<text");
+    });
+  });
+
+  // ── renderSetupImage ─────────────────────────────────────────────────────
+
+  describe("renderSetupImage", () => {
+    it("should return a data URI starting with data:image/svg+xml,", () => {
+      const result = renderSetupImage();
+      expect(result).toMatch(/^data:image\/svg\+xml,/);
+    });
+
+    it("should produce valid SVG with 144×144 dimensions", () => {
+      const svg = decodeSvg(renderSetupImage());
+      expect(svg).toContain('width="144"');
+      expect(svg).toContain('height="144"');
+      expect(svg).toContain('viewBox="0 0 144 144"');
+    });
+
+    it('should display "Please" text', () => {
+      const svg = decodeSvg(renderSetupImage());
+      expect(svg).toContain("Please");
+    });
+
+    it('should display "Setup" text', () => {
+      const svg = decodeSvg(renderSetupImage());
+      expect(svg).toContain("Setup");
+    });
+
+    it("should use the background color", () => {
+      const svg = decodeSvg(renderSetupImage());
+      expect(svg).toContain(`fill="${BG_COLOR}"`);
+    });
+
+    it("should use a gray accent bar", () => {
+      const svg = decodeSvg(renderSetupImage());
+      expect(svg).toContain(`fill="${STATUS_COLORS.gray}"`);
+    });
+
+    it("should use primary color for Setup text (bold)", () => {
+      const svg = decodeSvg(renderSetupImage());
+      expect(svg).toContain(`fill="${TEXT_PRIMARY}"`);
+      expect(svg).toContain('font-weight="bold"');
+    });
+
+    it("should use secondary color for Please text", () => {
+      const svg = decodeSvg(renderSetupImage());
+      expect(svg).toContain(`fill="${TEXT_SECONDARY}"`);
+    });
+
+    it("should include the 6px accent bar", () => {
+      const svg = decodeSvg(renderSetupImage());
+      expect(svg).toContain('height="6"');
+    });
+
+    it("should center text horizontally", () => {
+      const svg = decodeSvg(renderSetupImage());
+      expect(svg).toContain('text-anchor="middle"');
+      expect(svg).toContain('x="72"');
     });
   });
 

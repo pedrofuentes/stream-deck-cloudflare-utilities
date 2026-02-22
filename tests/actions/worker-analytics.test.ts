@@ -309,7 +309,7 @@ describe("WorkerAnalytics", () => {
       vi.useRealTimers();
     });
 
-    it("should show placeholder when settings incomplete", async () => {
+    it("should show setup image when credentials missing", async () => {
       vi.useFakeTimers();
       const { getGlobalSettings } = await import(
         "../../src/services/global-settings-store"
@@ -324,6 +324,26 @@ describe("WorkerAnalytics", () => {
       expect(ev.action.setImage).toHaveBeenCalledWith(
         expect.stringContaining("data:image/svg+xml,")
       );
+      const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
+      expect(svg).toContain("Setup");
+      expect(svg).toContain("Please");
+
+      vi.useRealTimers();
+    });
+
+    it("should show placeholder when credentials present but workerName missing", async () => {
+      vi.useFakeTimers();
+
+      const action = new WorkerAnalytics();
+      const ev = makeMockEvent({});
+
+      await action.onWillAppear(ev);
+
+      expect(ev.action.setImage).toHaveBeenCalledWith(
+        expect.stringContaining("data:image/svg+xml,")
+      );
+      const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
+      expect(svg).toContain("...");
 
       vi.useRealTimers();
     });

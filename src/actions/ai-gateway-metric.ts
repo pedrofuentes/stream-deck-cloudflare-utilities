@@ -24,7 +24,7 @@ import {
   RateLimitError,
 } from "../services/cloudflare-ai-gateway-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
-import { renderKeyImage, renderPlaceholderImage, STATUS_COLORS } from "../services/key-image-renderer";
+import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
 import type {
@@ -174,6 +174,11 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
+    if (!this.hasCredentials(global)) {
+      await ev.action.setImage(renderSetupImage());
+      return;
+    }
+
     if (!this.hasRequiredSettings(settings, global)) {
       await ev.action.setImage(renderPlaceholderImage());
       return;
@@ -210,6 +215,15 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
 
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
+
+    if (!this.hasCredentials(global)) {
+      this.apiClient = null;
+      this.lastMetrics = null;
+      this.lastGatewayId = null;
+      this.lastDataSettings = {};
+      await ev.action.setImage(renderSetupImage());
+      return;
+    }
 
     if (!this.hasRequiredSettings(settings, global)) {
       this.apiClient = null;
@@ -434,7 +448,15 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   }
 
   /**
-   * Checks whether the required settings are present.
+   * Checks whether API credentials (apiToken + accountId) are present.
+   */
+  public hasCredentials(global?: { apiToken?: string; accountId?: string }): boolean {
+    const g = global ?? getGlobalSettings();
+    return !!(g.apiToken && g.accountId);
+  }
+
+  /**
+   * Checks whether all required settings (credentials + gateway ID) are present.
    */
   public hasRequiredSettings(settings: AiGatewayMetricSettings, global?: { apiToken?: string; accountId?: string }): boolean {
     const g = global ?? getGlobalSettings();
@@ -527,6 +549,11 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       // Preserve the saved display metric from settings
       this.displayMetric = settings.metric ?? this.displayMetric;
       this.marquee.setText(settings.gatewayId ?? "");
+
+      if (!this.hasCredentials(global)) {
+        await ev.action.setImage(renderSetupImage());
+        return;
+      }
 
       if (!this.hasRequiredSettings(settings, global)) {
         await ev.action.setImage(renderPlaceholderImage());
