@@ -1,8 +1,8 @@
 # Stream Deck Cloudflare Utilities
 
-[![Version](https://img.shields.io/badge/version-1.1.3-blue.svg)](https://github.com/pedrofuentes/stream-deck-cloudflare-utilities/releases)
+[![Version](https://img.shields.io/badge/version-1.2.1-blue.svg)](https://github.com/pedrofuentes/stream-deck-cloudflare-utilities/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-902%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-1081%20passing-brightgreen.svg)](#)
 
 A [Stream Deck](https://www.elgato.com/stream-deck) plugin that provides a set of utilities to display real-time information from [Cloudflare](https://www.cloudflare.com/) directly on your Stream Deck keys.
 

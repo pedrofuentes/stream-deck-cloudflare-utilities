@@ -13,13 +13,25 @@ import {
   formatMetricValue,
 } from "../../src/actions/kv-namespace-metric";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
+import { getGlobalSettings, onGlobalSettingsChanged } from "../../src/services/global-settings-store";
+import { resetPollingCoordinator, getPollingCoordinator } from "../../src/services/polling-coordinator";
 import type { KvMetrics, KvMetricType } from "../../src/types/cloudflare-kv";
 import { KV_METRIC_CYCLE_ORDER } from "../../src/types/cloudflare-kv";
 
-// Mock @elgato/streamdeck
+// ── Mocks ────────────────────────────────────────────────────────────────────
+
+let capturedGlobalListener: ((settings: Record<string, unknown>) => void) | null = null;
+vi.mock("../../src/services/global-settings-store", () => ({
+  getGlobalSettings: vi.fn(),
+  onGlobalSettingsChanged: vi.fn().mockImplementation((fn: (settings: Record<string, unknown>) => void) => {
+    capturedGlobalListener = fn;
+    return vi.fn();
+  }),
+}));
+
 vi.mock("@elgato/streamdeck", () => ({
   default: {
-    logger: { error: vi.fn(), debug: vi.fn(), setLevel: vi.fn() },
+    logger: { debug: vi.fn(), error: vi.fn(), setLevel: vi.fn() },
     actions: { registerAction: vi.fn() },
     connect: vi.fn(),
   },
@@ -27,35 +39,35 @@ vi.mock("@elgato/streamdeck", () => ({
   SingletonAction: class {},
 }));
 
-// Mock the global settings store
-vi.mock("../../src/services/global-settings-store", () => ({
-  getGlobalSettings: vi.fn(() => ({
-    apiToken: "mock-token",
-    accountId: "mock-account-id",
-  })),
-  onGlobalSettingsChanged: vi.fn(() => vi.fn()),
-}));
+let mockGetAnalytics: ReturnType<typeof vi.fn>;
+
+vi.mock("../../src/services/cloudflare-kv-api", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("../../src/services/cloudflare-kv-api")>();
+  return {
+    ...orig,
+    CloudflareKvApi: class MockCloudflareKvApi {
+      constructor() { this.getAnalytics = mockGetAnalytics; }
+      getAnalytics: ReturnType<typeof vi.fn>;
+    },
+  };
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockEvent(
-  settings: Record<string, unknown> = {},
-  overrides: Record<string, unknown> = {}
-) {
+function makeMockEvent(settings: Record<string, unknown> = {}) {
   return {
     payload: { settings },
     action: {
       setImage: vi.fn().mockResolvedValue(undefined),
       setSettings: vi.fn().mockResolvedValue(undefined),
-      ...overrides,
     },
   } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 function makeMetrics(overrides?: Partial<KvMetrics>): KvMetrics {
   return {
-    readQueries: 10000,
-    writeQueries: 500,
+    readQueries: 5000,
+    writeQueries: 200,
     deleteQueries: 50,
     listQueries: 100,
     ...overrides,
@@ -67,253 +79,302 @@ function decodeSvg(dataUri: string): string {
   return decodeURIComponent(dataUri.slice(prefix.length));
 }
 
+const VALID_SETTINGS = {
+  namespaceId: "ns-123",
+  namespaceName: "my-kv",
+  metric: "reads" as const,
+  timeRange: "24h" as const,
+};
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
+describe("truncateNamespaceName", () => {
+  it("should return names ≤ 10 chars unchanged", () => { expect(truncateNamespaceName("my-kv")).toBe("my-kv"); });
+  it("should truncate names > 10 chars", () => { expect(truncateNamespaceName("my-production-kv")).toBe("my-produc…"); });
+  it("should handle empty string", () => { expect(truncateNamespaceName("")).toBe(""); });
+});
+
+describe("metricColor", () => {
+  it("should return blue for reads", () => { expect(metricColor("reads")).toBe(STATUS_COLORS.blue); });
+  it("should return amber for writes", () => { expect(metricColor("writes")).toBe(STATUS_COLORS.amber); });
+  it("should return red for deletes", () => { expect(metricColor("deletes")).toBe(STATUS_COLORS.red); });
+  it("should return green for lists", () => { expect(metricColor("lists")).toBe(STATUS_COLORS.green); });
+  it("should return gray for unknown", () => { expect(metricColor("unknown" as KvMetricType)).toBe(STATUS_COLORS.gray); });
+});
+
+describe("formatMetricValue", () => {
+  const metrics = makeMetrics();
+  it("should format reads", () => { expect(formatMetricValue("reads", metrics)).toBe("5K"); });
+  it("should format writes", () => { expect(formatMetricValue("writes", metrics)).toBe("200"); });
+  it("should format deletes", () => { expect(formatMetricValue("deletes", metrics)).toBe("50"); });
+  it("should format lists", () => { expect(formatMetricValue("lists", metrics)).toBe("100"); });
+  it("should return N/A for unknown", () => { expect(formatMetricValue("unknown" as KvMetricType, metrics)).toBe("N/A"); });
+  it("should format zero values", () => {
+    const zeros = makeMetrics({ readQueries: 0, writeQueries: 0, deleteQueries: 0, listQueries: 0 });
+    expect(formatMetricValue("reads", zeros)).toBe("0");
+  });
+});
+
+describe("key cycling order", () => {
+  it("reads → writes", () => { expect(KV_METRIC_CYCLE_ORDER[(KV_METRIC_CYCLE_ORDER.indexOf("reads") + 1) % KV_METRIC_CYCLE_ORDER.length]).toBe("writes"); });
+  it("writes → deletes", () => { expect(KV_METRIC_CYCLE_ORDER[(KV_METRIC_CYCLE_ORDER.indexOf("writes") + 1) % KV_METRIC_CYCLE_ORDER.length]).toBe("deletes"); });
+  it("deletes → lists", () => { expect(KV_METRIC_CYCLE_ORDER[(KV_METRIC_CYCLE_ORDER.indexOf("deletes") + 1) % KV_METRIC_CYCLE_ORDER.length]).toBe("lists"); });
+  it("lists → reads (wraps)", () => { expect(KV_METRIC_CYCLE_ORDER[(KV_METRIC_CYCLE_ORDER.indexOf("lists") + 1) % KV_METRIC_CYCLE_ORDER.length]).toBe("reads"); });
+  it("should have 4 metrics", () => { expect(KV_METRIC_CYCLE_ORDER).toHaveLength(4); });
+});
+
 describe("KvNamespaceMetric", () => {
-  // ── truncateNamespaceName ────────────────────────────────────────────
+  let action: KvNamespaceMetric;
 
-  describe("truncateNamespaceName", () => {
-    it("should return names ≤ 10 chars unchanged", () => {
-      expect(truncateNamespaceName("my-ns")).toBe("my-ns");
-    });
-
-    it("should return exactly 10 chars unchanged", () => {
-      expect(truncateNamespaceName("0123456789")).toBe("0123456789");
-    });
-
-    it("should truncate and add ellipsis for names > 10 chars", () => {
-      expect(truncateNamespaceName("my-production-kv")).toBe("my-produc…");
-    });
-
-    it("should handle empty string", () => {
-      expect(truncateNamespaceName("")).toBe("");
-    });
+  beforeEach(() => {
+    action = new KvNamespaceMetric();
+    mockGetAnalytics = vi.fn();
+    capturedGlobalListener = null;
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token", accountId: "test-account" });
+    vi.useFakeTimers();
   });
 
-  // ── metricColor ──────────────────────────────────────────────────────
-
-  describe("metricColor", () => {
-    it("should return blue for reads", () => {
-      expect(metricColor("reads")).toBe(STATUS_COLORS.blue);
-    });
-
-    it("should return amber for writes", () => {
-      expect(metricColor("writes")).toBe(STATUS_COLORS.amber);
-    });
-
-    it("should return red for deletes", () => {
-      expect(metricColor("deletes")).toBe(STATUS_COLORS.red);
-    });
-
-    it("should return green for lists", () => {
-      expect(metricColor("lists")).toBe(STATUS_COLORS.green);
-    });
-
-    it("should return gray for unknown metric", () => {
-      expect(metricColor("unknown" as KvMetricType)).toBe(STATUS_COLORS.gray);
-    });
+  afterEach(() => {
+    resetPollingCoordinator();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  // ── formatMetricValue ────────────────────────────────────────────────
-
-  describe("formatMetricValue", () => {
-    const metrics = makeMetrics();
-
-    it("should format reads as compact number", () => {
-      expect(formatMetricValue("reads", metrics)).toBe("10K");
-    });
-
-    it("should format writes as compact number", () => {
-      expect(formatMetricValue("writes", metrics)).toBe("500");
-    });
-
-    it("should format deletes as compact number", () => {
-      expect(formatMetricValue("deletes", metrics)).toBe("50");
-    });
-
-    it("should format lists as compact number", () => {
-      expect(formatMetricValue("lists", metrics)).toBe("100");
-    });
-
-    it("should return N/A for unknown metric", () => {
-      expect(formatMetricValue("unknown" as KvMetricType, metrics)).toBe("N/A");
-    });
-
-    it("should format zero values correctly", () => {
-      const zeros = makeMetrics({
-        readQueries: 0,
-        writeQueries: 0,
-        deleteQueries: 0,
-        listQueries: 0,
-      });
-      expect(formatMetricValue("reads", zeros)).toBe("0");
-      expect(formatMetricValue("writes", zeros)).toBe("0");
-      expect(formatMetricValue("deletes", zeros)).toBe("0");
-      expect(formatMetricValue("lists", zeros)).toBe("0");
-    });
+  describe("hasRequiredSettings", () => {
+    it("should return true with all settings", () => { expect(action.hasRequiredSettings({ namespaceId: "ns-1" }, { apiToken: "t", accountId: "a" })).toBe(true); });
+    it("should return false without namespaceId", () => { expect(action.hasRequiredSettings({}, { apiToken: "t", accountId: "a" })).toBe(false); });
+    it("should return false without apiToken", () => { expect(action.hasRequiredSettings({ namespaceId: "ns-1" }, { accountId: "a" })).toBe(false); });
+    it("should return false without accountId", () => { expect(action.hasRequiredSettings({ namespaceId: "ns-1" }, { apiToken: "t" })).toBe(false); });
   });
-
-  // ── renderMetric ─────────────────────────────────────────────────────
 
   describe("renderMetric", () => {
-    let action: KvNamespaceMetric;
-
-    beforeEach(() => {
-      action = new KvNamespaceMetric();
-    });
-
-    it("should return a data URI", () => {
-      const result = action.renderMetric("reads", "my-ns", makeMetrics(), "24h");
-      expect(result).toMatch(/^data:image\/svg\+xml,/);
-    });
-
-    it("should include namespace name in SVG", () => {
-      const svg = decodeSvg(action.renderMetric("reads", "my-ns", makeMetrics(), "24h"));
-      expect(svg).toContain("my-ns");
-    });
-
-    it("should include formatted metric value", () => {
-      const svg = decodeSvg(action.renderMetric("reads", "n", makeMetrics(), "24h"));
-      expect(svg).toContain("10K");
-    });
-
-    it("should include metric label and time range", () => {
-      const svg = decodeSvg(action.renderMetric("deletes", "n", makeMetrics(), "7d"));
-      expect(svg).toContain("deletes 7d");
-    });
-
-    it("should use correct color for deletes", () => {
-      const svg = decodeSvg(action.renderMetric("deletes", "n", makeMetrics(), "24h"));
-      expect(svg).toContain(STATUS_COLORS.red);
+    it("should render reads with time range", () => {
+      const svg = decodeSvg(action.renderMetric("reads", "my-kv", makeMetrics(), "24h"));
+      expect(svg).toContain("my-kv");
+      expect(svg).toContain("5K");
+      expect(svg).toContain("reads 24h");
     });
 
     it("should use displayName when provided", () => {
-      const svg = decodeSvg(
-        action.renderMetric("reads", "longnamespacename", makeMetrics(), "24h", "short")
-      );
+      const svg = decodeSvg(action.renderMetric("reads", "longname", makeMetrics(), "24h", "short"));
       expect(svg).toContain("short");
-      expect(svg).not.toContain("longnamespacename");
+    });
+
+    it("should default to 24h", () => {
+      const svg = decodeSvg(action.renderMetric("reads", "d", makeMetrics()));
+      expect(svg).toContain("reads 24h");
     });
   });
 
-  // ── hasRequiredSettings ──────────────────────────────────────────────
-
-  describe("hasRequiredSettings", () => {
-    let action: KvNamespaceMetric;
-
-    beforeEach(() => {
-      action = new KvNamespaceMetric();
+  describe("coordinator polling", () => {
+    it("should subscribe on appear", async () => {
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      expect(getPollingCoordinator().subscriberCount).toBeGreaterThanOrEqual(1);
     });
 
-    it("should return true when all settings present", () => {
-      expect(
-        action.hasRequiredSettings(
-          { namespaceId: "ns-1" },
-          { apiToken: "t", accountId: "a" }
-        )
-      ).toBe(true);
+    it("should set error state after error", async () => {
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      expect((action as any).isErrorState).toBe(true);
     });
 
-    it("should return false when namespaceId is missing", () => {
-      expect(
-        action.hasRequiredSettings({}, { apiToken: "t", accountId: "a" })
-      ).toBe(false);
-    });
-
-    it("should return false when apiToken is missing", () => {
-      expect(
-        action.hasRequiredSettings({ namespaceId: "ns-1" }, { accountId: "a" })
-      ).toBe(false);
-    });
-
-    it("should return false when accountId is missing", () => {
-      expect(
-        action.hasRequiredSettings({ namespaceId: "ns-1" }, { apiToken: "t" })
-      ).toBe(false);
+    it("should reset error state after success", async () => {
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      (action as any).skipUntil = 0;
+      await getPollingCoordinator().tick();
+      expect((action as any).isErrorState).toBe(false);
     });
   });
-
-  // ── Lifecycle ────────────────────────────────────────────────────────
 
   describe("onWillAppear", () => {
-    afterEach(() => {
-      vi.restoreAllMocks();
-      vi.useRealTimers();
-    });
-
     it("should show setup image when credentials missing", async () => {
-      vi.useFakeTimers();
-      const { getGlobalSettings } = await import(
-        "../../src/services/global-settings-store"
-      );
-      (getGlobalSettings as any).mockReturnValueOnce({});
-
-      const action = new KvNamespaceMetric();
+      vi.mocked(getGlobalSettings).mockReturnValue({});
       const ev = makeMockEvent({});
-
       await action.onWillAppear(ev);
-
-      expect(ev.action.setImage).toHaveBeenCalledWith(
-        expect.stringContaining("data:image/svg+xml,")
-      );
-      const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
-      expect(svg).toContain("Setup");
-      vi.useRealTimers();
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
     });
 
-    it("should show placeholder when credentials present but namespaceId missing", async () => {
-      vi.useFakeTimers();
-
-      const action = new KvNamespaceMetric();
+    it("should show placeholder when namespaceId missing", async () => {
       const ev = makeMockEvent({});
-
       await action.onWillAppear(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("...");
+    });
 
-      expect(ev.action.setImage).toHaveBeenCalledWith(
-        expect.stringContaining("data:image/svg+xml,")
-      );
-      const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
-      expect(svg).toContain("...");
-      vi.useRealTimers();
+    it("should fetch and display metrics", async () => {
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      expect(mockGetAnalytics).toHaveBeenCalledWith("ns-123", "24h");
+      expect(ev.action.setImage).toHaveBeenCalledTimes(2);
+      expect(decodeSvg(ev.action.setImage.mock.calls[1][0])).toContain("5K");
+    });
+
+    it("should show ERR on API failure", async () => {
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Net error"));
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[1][0])).toContain("ERR");
+    });
+
+    it("should default metric to reads", async () => {
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      const ev = makeMockEvent({ namespaceId: "ns-1" });
+      await action.onWillAppear(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[1][0])).toContain("reads 24h");
+    });
+
+    it("should schedule refresh via coordinator", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("onDidReceiveSettings", () => {
+    it("should show setup when credentials removed", async () => {
+      vi.mocked(getGlobalSettings).mockReturnValue({});
+      const ev = makeMockEvent({});
+      await action.onDidReceiveSettings(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
+    });
+
+    it("should reuse cached metrics on metric-only change", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      const ev2 = makeMockEvent({ ...VALID_SETTINGS, metric: "writes" });
+      await action.onDidReceiveSettings(ev2);
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
+      expect(decodeSvg(ev2.action.setImage.mock.calls[0][0])).toContain("200");
+    });
+
+    it("should refetch when namespaceId changes", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onDidReceiveSettings(makeMockEvent({ ...VALID_SETTINGS, namespaceId: "ns-other" }));
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(2);
     });
   });
 
   describe("onWillDisappear", () => {
-    it("should clean up without error", () => {
-      const action = new KvNamespaceMetric();
-      expect(() => action.onWillDisappear({} as any)).not.toThrow();
+    it("should clean up without error", () => { expect(() => action.onWillDisappear({} as any)).not.toThrow(); });
+
+    it("should stop polling", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      action.onWillDisappear({} as any);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
     });
   });
 
-  // ── Key Cycling ──────────────────────────────────────────────────────
-
-  describe("key cycling", () => {
-    it("reads → writes", () => {
-      const idx = KV_METRIC_CYCLE_ORDER.indexOf("reads");
-      const next = KV_METRIC_CYCLE_ORDER[(idx + 1) % KV_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("writes");
+  describe("onKeyDown", () => {
+    it("should cycle from reads to writes", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      const keyEv = makeMockEvent(VALID_SETTINGS);
+      await action.onKeyDown(keyEv);
+      expect(keyEv.action.setSettings).toHaveBeenCalledWith(expect.objectContaining({ metric: "writes" }));
     });
 
-    it("writes → deletes", () => {
-      const idx = KV_METRIC_CYCLE_ORDER.indexOf("writes");
-      const next = KV_METRIC_CYCLE_ORDER[(idx + 1) % KV_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("deletes");
+    it("should use cached data", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onKeyDown(makeMockEvent(VALID_SETTINGS));
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
     });
 
-    it("deletes → lists", () => {
-      const idx = KV_METRIC_CYCLE_ORDER.indexOf("deletes");
-      const next = KV_METRIC_CYCLE_ORDER[(idx + 1) % KV_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("lists");
+    it("should do nothing when incomplete", async () => {
+      vi.mocked(getGlobalSettings).mockReturnValue({});
+      const ev = makeMockEvent({});
+      await action.onKeyDown(ev);
+      expect(ev.action.setSettings).not.toHaveBeenCalled();
     });
 
-    it("lists → reads (wraps)", () => {
-      const idx = KV_METRIC_CYCLE_ORDER.indexOf("lists");
-      const next = KV_METRIC_CYCLE_ORDER[(idx + 1) % KV_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("reads");
+    it("should set pendingKeyCycle flag", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onKeyDown(makeMockEvent(VALID_SETTINGS));
+      const settingsEv = makeMockEvent({ ...VALID_SETTINGS, metric: "writes" });
+      await action.onDidReceiveSettings(settingsEv);
+      expect(settingsEv.action.setImage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("error back-off", () => {
+    it("should keep cached display when refresh fails", async () => {
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Rate limited"));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(ev.action.setImage).not.toHaveBeenCalled();
     });
 
-    it("cycle order should have 4 metrics", () => {
-      expect(KV_METRIC_CYCLE_ORDER).toHaveLength(4);
+    it("should show ERR only when no cache", async () => {
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[1][0])).toContain("ERR");
+    });
+  });
+
+  describe("marquee", () => {
+    const LONG_SETTINGS = { ...VALID_SETTINGS, namespaceName: "production-kv" };
+
+    it("should scroll for long names", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(LONG_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(ev.action.setImage.mock.calls.length).toBeGreaterThan(0);
+    });
+
+    it("should not start for short names", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(ev.action.setImage).not.toHaveBeenCalled();
+    });
+
+    it("should stop on disappear", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(LONG_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      action.onWillDisappear(ev);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(ev.action.setImage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("global settings change", () => {
+    it("should re-initialize when credentials change", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics({ readQueries: 999 }));
+      await capturedGlobalListener!({ apiToken: "new-token", accountId: "new-account" });
+      expect(ev.action.setImage).toHaveBeenCalled();
+    });
+
+    it("should show setup when credentials removed", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      vi.mocked(getGlobalSettings).mockReturnValue({});
+      await capturedGlobalListener!({});
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
     });
   });
 });

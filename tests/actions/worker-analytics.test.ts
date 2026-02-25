@@ -11,19 +11,30 @@ import {
   metricColor,
   formatMetricValue,
 } from "../../src/actions/worker-analytics";
-import { CloudflareWorkerAnalyticsApi } from "../../src/services/cloudflare-worker-analytics-api";
 import { truncateWorkerName } from "../../src/services/cloudflare-workers-api";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
+import { getGlobalSettings, onGlobalSettingsChanged } from "../../src/services/global-settings-store";
+import { resetPollingCoordinator, getPollingCoordinator } from "../../src/services/polling-coordinator";
 import type {
   WorkerAnalyticsMetrics,
   WorkerAnalyticsMetricType,
 } from "../../src/types/cloudflare-worker-analytics";
 import { WORKER_METRIC_CYCLE_ORDER } from "../../src/types/cloudflare-worker-analytics";
 
-// Mock @elgato/streamdeck
+// ── Mocks ────────────────────────────────────────────────────────────────────
+
+let capturedGlobalListener: ((settings: Record<string, unknown>) => void) | null = null;
+vi.mock("../../src/services/global-settings-store", () => ({
+  getGlobalSettings: vi.fn(),
+  onGlobalSettingsChanged: vi.fn().mockImplementation((fn: (settings: Record<string, unknown>) => void) => {
+    capturedGlobalListener = fn;
+    return vi.fn();
+  }),
+}));
+
 vi.mock("@elgato/streamdeck", () => ({
   default: {
-    logger: { error: vi.fn(), debug: vi.fn(), setLevel: vi.fn() },
+    logger: { debug: vi.fn(), error: vi.fn(), setLevel: vi.fn() },
     actions: { registerAction: vi.fn() },
     connect: vi.fn(),
   },
@@ -31,27 +42,27 @@ vi.mock("@elgato/streamdeck", () => ({
   SingletonAction: class {},
 }));
 
-// Mock the global settings store
-vi.mock("../../src/services/global-settings-store", () => ({
-  getGlobalSettings: vi.fn(() => ({
-    apiToken: "mock-token",
-    accountId: "mock-account-id",
-  })),
-  onGlobalSettingsChanged: vi.fn(() => vi.fn()), // returns unsubscribe
-}));
+let mockGetAnalytics: ReturnType<typeof vi.fn>;
+
+vi.mock("../../src/services/cloudflare-worker-analytics-api", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("../../src/services/cloudflare-worker-analytics-api")>();
+  return {
+    ...orig,
+    CloudflareWorkerAnalyticsApi: class MockCloudflareWorkerAnalyticsApi {
+      constructor() { this.getAnalytics = mockGetAnalytics; }
+      getAnalytics: ReturnType<typeof vi.fn>;
+    },
+  };
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockEvent(
-  settings: Record<string, unknown> = {},
-  overrides: Record<string, unknown> = {}
-) {
+function makeMockEvent(settings: Record<string, unknown> = {}) {
   return {
     payload: { settings },
     action: {
       setImage: vi.fn().mockResolvedValue(undefined),
       setSettings: vi.fn().mockResolvedValue(undefined),
-      ...overrides,
     },
   } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
@@ -68,341 +79,324 @@ function makeMetrics(overrides?: Partial<WorkerAnalyticsMetrics>): WorkerAnalyti
   };
 }
 
-/** Decode a data URI to the raw SVG string. */
 function decodeSvg(dataUri: string): string {
   const prefix = "data:image/svg+xml,";
   return decodeURIComponent(dataUri.slice(prefix.length));
 }
 
+const VALID_SETTINGS = {
+  workerName: "my-worker",
+  metric: "requests" as const,
+  timeRange: "24h" as const,
+};
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
+describe("truncateWorkerName", () => {
+  it("should return names ≤ 10 chars unchanged", () => { expect(truncateWorkerName("my-worker")).toBe("my-worker"); });
+  it("should return exactly 10 chars unchanged", () => { expect(truncateWorkerName("0123456789")).toBe("0123456789"); });
+  it("should truncate names > 10 chars", () => { expect(truncateWorkerName("my-very-long-worker")).toBe("my-very-l…"); });
+  it("should handle empty string", () => { expect(truncateWorkerName("")).toBe(""); });
+});
+
+describe("metricColor", () => {
+  it("should return blue for requests", () => { expect(metricColor("requests")).toBe(STATUS_COLORS.blue); });
+  it("should return red for errors", () => { expect(metricColor("errors")).toBe(STATUS_COLORS.red); });
+  it("should return red for error_rate", () => { expect(metricColor("error_rate")).toBe(STATUS_COLORS.red); });
+  it("should return green for cpu_p50", () => { expect(metricColor("cpu_p50")).toBe(STATUS_COLORS.green); });
+  it("should return amber for cpu_p99", () => { expect(metricColor("cpu_p99")).toBe(STATUS_COLORS.amber); });
+  it("should return blue for wall_time", () => { expect(metricColor("wall_time")).toBe(STATUS_COLORS.blue); });
+  it("should return blue for subrequests", () => { expect(metricColor("subrequests")).toBe(STATUS_COLORS.blue); });
+  it("should return gray for unknown", () => { expect(metricColor("unknown" as WorkerAnalyticsMetricType)).toBe(STATUS_COLORS.gray); });
+});
+
+describe("formatMetricValue", () => {
+  const metrics = makeMetrics();
+  it("should format requests", () => { expect(formatMetricValue("requests", metrics)).toBe("5K"); });
+  it("should format errors", () => { expect(formatMetricValue("errors", metrics)).toBe("23"); });
+  it("should format error_rate as percentage", () => { expect(formatMetricValue("error_rate", metrics)).toBe("0.5%"); });
+  it("should format error_rate as 0% when no requests", () => { expect(formatMetricValue("error_rate", makeMetrics({ requests: 0 }))).toBe("0%"); });
+  it("should format cpu_p50 as duration", () => { expect(formatMetricValue("cpu_p50", metrics)).toBe("2.3ms"); });
+  it("should format cpu_p99 as duration", () => { expect(formatMetricValue("cpu_p99", metrics)).toBe("45ms"); });
+  it("should format wall_time as duration", () => { expect(formatMetricValue("wall_time", metrics)).toBe("150ms"); });
+  it("should format subrequests", () => { expect(formatMetricValue("subrequests", metrics)).toBe("1.2K"); });
+  it("should return N/A for unknown", () => { expect(formatMetricValue("unknown" as WorkerAnalyticsMetricType, metrics)).toBe("N/A"); });
+  it("should format zero values", () => {
+    const zeros = makeMetrics({ requests: 0, errors: 0, subrequests: 0, wallTime: 0, cpuTimeP50: 0, cpuTimeP99: 0 });
+    expect(formatMetricValue("requests", zeros)).toBe("0");
+    expect(formatMetricValue("errors", zeros)).toBe("0");
+    expect(formatMetricValue("error_rate", zeros)).toBe("0%");
+    expect(formatMetricValue("cpu_p50", zeros)).toBe("0ms");
+    expect(formatMetricValue("cpu_p99", zeros)).toBe("0ms");
+    expect(formatMetricValue("wall_time", zeros)).toBe("0ms");
+    expect(formatMetricValue("subrequests", zeros)).toBe("0");
+  });
+});
+
+describe("key cycling order", () => {
+  it("requests → errors", () => { expect(WORKER_METRIC_CYCLE_ORDER[(WORKER_METRIC_CYCLE_ORDER.indexOf("requests") + 1) % WORKER_METRIC_CYCLE_ORDER.length]).toBe("errors"); });
+  it("errors → error_rate", () => { expect(WORKER_METRIC_CYCLE_ORDER[(WORKER_METRIC_CYCLE_ORDER.indexOf("errors") + 1) % WORKER_METRIC_CYCLE_ORDER.length]).toBe("error_rate"); });
+  it("error_rate → cpu_p50", () => { expect(WORKER_METRIC_CYCLE_ORDER[(WORKER_METRIC_CYCLE_ORDER.indexOf("error_rate") + 1) % WORKER_METRIC_CYCLE_ORDER.length]).toBe("cpu_p50"); });
+  it("cpu_p50 → cpu_p99", () => { expect(WORKER_METRIC_CYCLE_ORDER[(WORKER_METRIC_CYCLE_ORDER.indexOf("cpu_p50") + 1) % WORKER_METRIC_CYCLE_ORDER.length]).toBe("cpu_p99"); });
+  it("cpu_p99 → wall_time", () => { expect(WORKER_METRIC_CYCLE_ORDER[(WORKER_METRIC_CYCLE_ORDER.indexOf("cpu_p99") + 1) % WORKER_METRIC_CYCLE_ORDER.length]).toBe("wall_time"); });
+  it("wall_time → subrequests", () => { expect(WORKER_METRIC_CYCLE_ORDER[(WORKER_METRIC_CYCLE_ORDER.indexOf("wall_time") + 1) % WORKER_METRIC_CYCLE_ORDER.length]).toBe("subrequests"); });
+  it("subrequests → requests (wraps)", () => { expect(WORKER_METRIC_CYCLE_ORDER[(WORKER_METRIC_CYCLE_ORDER.indexOf("subrequests") + 1) % WORKER_METRIC_CYCLE_ORDER.length]).toBe("requests"); });
+  it("should have 7 metrics", () => { expect(WORKER_METRIC_CYCLE_ORDER).toHaveLength(7); });
+});
+
 describe("WorkerAnalytics", () => {
-  // ── truncateWorkerName ───────────────────────────────────────────────
+  let action: WorkerAnalytics;
 
-  describe("truncateWorkerName", () => {
-    it("should return names ≤ 10 chars unchanged", () => {
-      expect(truncateWorkerName("my-worker")).toBe("my-worker");
-    });
-
-    it("should return exactly 10 chars unchanged", () => {
-      expect(truncateWorkerName("0123456789")).toBe("0123456789");
-    });
-
-    it("should truncate and add ellipsis for names > 10 chars", () => {
-      expect(truncateWorkerName("my-very-long-worker")).toBe("my-very-l…");
-    });
-
-    it("should handle empty string", () => {
-      expect(truncateWorkerName("")).toBe("");
-    });
+  beforeEach(() => {
+    action = new WorkerAnalytics();
+    mockGetAnalytics = vi.fn();
+    capturedGlobalListener = null;
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token", accountId: "test-account" });
+    vi.useFakeTimers();
   });
 
-  // ── metricColor ──────────────────────────────────────────────────────
-
-  describe("metricColor", () => {
-    it("should return blue for requests", () => {
-      expect(metricColor("requests")).toBe(STATUS_COLORS.blue);
-    });
-
-    it("should return red for errors", () => {
-      expect(metricColor("errors")).toBe(STATUS_COLORS.red);
-    });
-
-    it("should return red for error_rate", () => {
-      expect(metricColor("error_rate")).toBe(STATUS_COLORS.red);
-    });
-
-    it("should return green for cpu_p50", () => {
-      expect(metricColor("cpu_p50")).toBe(STATUS_COLORS.green);
-    });
-
-    it("should return amber for cpu_p99", () => {
-      expect(metricColor("cpu_p99")).toBe(STATUS_COLORS.amber);
-    });
-
-    it("should return blue for wall_time", () => {
-      expect(metricColor("wall_time")).toBe(STATUS_COLORS.blue);
-    });
-
-    it("should return blue for subrequests", () => {
-      expect(metricColor("subrequests")).toBe(STATUS_COLORS.blue);
-    });
-
-    it("should return gray for unknown metric", () => {
-      expect(metricColor("unknown" as WorkerAnalyticsMetricType)).toBe(STATUS_COLORS.gray);
-    });
+  afterEach(() => {
+    resetPollingCoordinator();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  // ── formatMetricValue ────────────────────────────────────────────────
-
-  describe("formatMetricValue", () => {
-    const metrics = makeMetrics();
-
-    it("should format requests as compact number", () => {
-      expect(formatMetricValue("requests", metrics)).toBe("5K");
-    });
-
-    it("should format errors as compact number", () => {
-      expect(formatMetricValue("errors", metrics)).toBe("23");
-    });
-
-    it("should format error_rate as percentage", () => {
-      // 23/5000 * 100 = 0.46%
-      expect(formatMetricValue("error_rate", metrics)).toBe("0.5%");
-    });
-
-    it("should format error_rate as 0% when no requests", () => {
-      expect(formatMetricValue("error_rate", makeMetrics({ requests: 0 }))).toBe("0%");
-    });
-
-    it("should format cpu_p50 as duration", () => {
-      // 2300 μs = 2.3ms
-      expect(formatMetricValue("cpu_p50", metrics)).toBe("2.3ms");
-    });
-
-    it("should format cpu_p99 as duration", () => {
-      // 45000 μs = 45ms
-      expect(formatMetricValue("cpu_p99", metrics)).toBe("45ms");
-    });
-
-    it("should format wall_time as duration", () => {
-      // 150000 μs = 150ms
-      expect(formatMetricValue("wall_time", metrics)).toBe("150ms");
-    });
-
-    it("should format subrequests as compact number", () => {
-      expect(formatMetricValue("subrequests", metrics)).toBe("1.2K");
-    });
-
-    it("should return N/A for unknown metric", () => {
-      expect(formatMetricValue("unknown" as WorkerAnalyticsMetricType, metrics)).toBe("N/A");
-    });
-
-    it("should format zero values correctly", () => {
-      const zeros = makeMetrics({
-        requests: 0,
-        errors: 0,
-        subrequests: 0,
-        wallTime: 0,
-        cpuTimeP50: 0,
-        cpuTimeP99: 0,
-      });
-      expect(formatMetricValue("requests", zeros)).toBe("0");
-      expect(formatMetricValue("errors", zeros)).toBe("0");
-      expect(formatMetricValue("error_rate", zeros)).toBe("0%");
-      expect(formatMetricValue("cpu_p50", zeros)).toBe("0ms");
-      expect(formatMetricValue("cpu_p99", zeros)).toBe("0ms");
-      expect(formatMetricValue("wall_time", zeros)).toBe("0ms");
-      expect(formatMetricValue("subrequests", zeros)).toBe("0");
-    });
+  describe("hasRequiredSettings", () => {
+    it("should return true with all settings", () => { expect(action.hasRequiredSettings({ workerName: "w" }, { apiToken: "t", accountId: "a" })).toBe(true); });
+    it("should return false without workerName", () => { expect(action.hasRequiredSettings({}, { apiToken: "t", accountId: "a" })).toBe(false); });
+    it("should return false without apiToken", () => { expect(action.hasRequiredSettings({ workerName: "w" }, { accountId: "a" })).toBe(false); });
+    it("should return false without accountId", () => { expect(action.hasRequiredSettings({ workerName: "w" }, { apiToken: "t" })).toBe(false); });
   });
 
-  // ── renderMetric ─────────────────────────────────────────────────────
+  describe("hasCredentials", () => {
+    it("should return true with both", () => { expect(action.hasCredentials({ apiToken: "t", accountId: "a" })).toBe(true); });
+    it("should return false without apiToken", () => { expect(action.hasCredentials({ accountId: "a" })).toBe(false); });
+    it("should return false without accountId", () => { expect(action.hasCredentials({ apiToken: "t" })).toBe(false); });
+  });
 
   describe("renderMetric", () => {
-    let action: WorkerAnalytics;
-
-    beforeEach(() => {
-      action = new WorkerAnalytics();
-    });
-
-    it("should return a data URI", () => {
-      const result = action.renderMetric("requests", "my-worker", makeMetrics(), "24h");
-      expect(result).toMatch(/^data:image\/svg\+xml,/);
-    });
-
-    it("should include worker name in SVG", () => {
-      const svg = decodeSvg(action.renderMetric("requests", "my-worker", makeMetrics(), "24h"));
-      expect(svg).toContain("my-worker");
-    });
-
-    it("should include formatted metric value", () => {
-      const svg = decodeSvg(action.renderMetric("requests", "wk", makeMetrics(), "24h"));
-      expect(svg).toContain("5K");
-    });
-
-    it("should include metric label and time range", () => {
-      const svg = decodeSvg(action.renderMetric("cpu_p50", "wk", makeMetrics(), "7d"));
-      expect(svg).toContain("cpu p50 7d");
-    });
-
-    it("should use correct color for errors", () => {
-      const svg = decodeSvg(action.renderMetric("errors", "wk", makeMetrics(), "24h"));
-      expect(svg).toContain(STATUS_COLORS.red);
-    });
-
+    it("should return a data URI", () => { expect(action.renderMetric("requests", "my-worker", makeMetrics(), "24h")).toMatch(/^data:image\/svg\+xml,/); });
+    it("should include worker name", () => { expect(decodeSvg(action.renderMetric("requests", "my-worker", makeMetrics(), "24h"))).toContain("my-worker"); });
+    it("should include metric value", () => { expect(decodeSvg(action.renderMetric("requests", "wk", makeMetrics(), "24h"))).toContain("5K"); });
+    it("should include label and time range", () => { expect(decodeSvg(action.renderMetric("cpu_p50", "wk", makeMetrics(), "7d"))).toContain("cpu p50 7d"); });
+    it("should use correct color", () => { expect(decodeSvg(action.renderMetric("errors", "wk", makeMetrics(), "24h"))).toContain(STATUS_COLORS.red); });
     it("should use displayName when provided", () => {
-      const svg = decodeSvg(
-        action.renderMetric("requests", "longworkername", makeMetrics(), "24h", "short")
-      );
+      const svg = decodeSvg(action.renderMetric("requests", "longworkername", makeMetrics(), "24h", "short"));
       expect(svg).toContain("short");
       expect(svg).not.toContain("longworkername");
     });
+    it("should default to 24h", () => { expect(decodeSvg(action.renderMetric("requests", "w", makeMetrics()))).toContain("reqs 24h"); });
   });
 
-  // ── hasRequiredSettings ──────────────────────────────────────────────
-
-  describe("hasRequiredSettings", () => {
-    let action: WorkerAnalytics;
-
-    beforeEach(() => {
-      action = new WorkerAnalytics();
+  describe("coordinator polling", () => {
+    it("should subscribe on appear", async () => {
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      expect(getPollingCoordinator().subscriberCount).toBeGreaterThanOrEqual(1);
     });
 
-    it("should return true when all settings present", () => {
-      expect(
-        action.hasRequiredSettings(
-          { workerName: "my-worker" },
-          { apiToken: "t", accountId: "a" }
-        )
-      ).toBe(true);
+    it("should set error state after error", async () => {
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      expect((action as any).isErrorState).toBe(true);
     });
 
-    it("should return false when workerName is missing", () => {
-      expect(
-        action.hasRequiredSettings({}, { apiToken: "t", accountId: "a" })
-      ).toBe(false);
-    });
-
-    it("should return false when apiToken is missing", () => {
-      expect(
-        action.hasRequiredSettings({ workerName: "w" }, { accountId: "a" })
-      ).toBe(false);
-    });
-
-    it("should return false when accountId is missing", () => {
-      expect(
-        action.hasRequiredSettings({ workerName: "w" }, { apiToken: "t" })
-      ).toBe(false);
+    it("should reset error state after success", async () => {
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      (action as any).skipUntil = 0;
+      await getPollingCoordinator().tick();
+      expect((action as any).isErrorState).toBe(false);
     });
   });
-
-  // ── coordinator backoff ─────────────────────────────────────────────
-
-  describe("coordinator backoff", () => {
-    it("should set skipUntil after error", async () => {
-      const { vi: _vi } = await import("vitest");
-      _vi.useFakeTimers();
-
-      const { getGlobalSettings } = await import(
-        "../../src/services/global-settings-store"
-      );
-      (getGlobalSettings as any).mockReturnValue({
-        apiToken: "t",
-        accountId: "a",
-      });
-
-      const action = new WorkerAnalytics();
-      // We just verify the error state property is accessible
-      // (the action uses skipUntil for coordinator-based backoff)
-      expect((action as any).skipUntil).toBe(0);
-
-      _vi.useRealTimers();
-    });
-  });
-
-  // ── Lifecycle Tests ──────────────────────────────────────────────────
 
   describe("onWillAppear", () => {
-    afterEach(() => {
-      vi.restoreAllMocks();
-      vi.useRealTimers();
-    });
-
     it("should show setup image when credentials missing", async () => {
-      vi.useFakeTimers();
-      const { getGlobalSettings } = await import(
-        "../../src/services/global-settings-store"
-      );
-      (getGlobalSettings as any).mockReturnValueOnce({});
-
-      const action = new WorkerAnalytics();
+      vi.mocked(getGlobalSettings).mockReturnValue({});
       const ev = makeMockEvent({});
-
       await action.onWillAppear(ev);
-
-      expect(ev.action.setImage).toHaveBeenCalledWith(
-        expect.stringContaining("data:image/svg+xml,")
-      );
-      const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
-      expect(svg).toContain("Setup");
-      expect(svg).toContain("Please");
-
-      vi.useRealTimers();
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
     });
 
-    it("should show placeholder when credentials present but workerName missing", async () => {
-      vi.useFakeTimers();
-
-      const action = new WorkerAnalytics();
+    it("should show placeholder when workerName missing", async () => {
       const ev = makeMockEvent({});
-
       await action.onWillAppear(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("...");
+    });
 
-      expect(ev.action.setImage).toHaveBeenCalledWith(
-        expect.stringContaining("data:image/svg+xml,")
-      );
-      const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
-      expect(svg).toContain("...");
+    it("should fetch and display metrics", async () => {
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      expect(mockGetAnalytics).toHaveBeenCalledWith("my-worker", "24h");
+      expect(ev.action.setImage).toHaveBeenCalledTimes(2);
+      expect(decodeSvg(ev.action.setImage.mock.calls[1][0])).toContain("5K");
+    });
 
-      vi.useRealTimers();
+    it("should show ERR on API failure", async () => {
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Net error"));
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[1][0])).toContain("ERR");
+    });
+
+    it("should default metric to requests", async () => {
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      const ev = makeMockEvent({ workerName: "w" });
+      await action.onWillAppear(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[1][0])).toContain("reqs 24h");
+    });
+
+    it("should schedule refresh via coordinator", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("onDidReceiveSettings", () => {
+    it("should show setup when credentials removed", async () => {
+      vi.mocked(getGlobalSettings).mockReturnValue({});
+      const ev = makeMockEvent({});
+      await action.onDidReceiveSettings(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
+    });
+
+    it("should reuse cached metrics on metric-only change", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      const ev2 = makeMockEvent({ ...VALID_SETTINGS, metric: "errors" });
+      await action.onDidReceiveSettings(ev2);
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
+      expect(decodeSvg(ev2.action.setImage.mock.calls[0][0])).toContain("23");
+    });
+
+    it("should refetch when workerName changes", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onDidReceiveSettings(makeMockEvent({ ...VALID_SETTINGS, workerName: "other-worker" }));
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(2);
     });
   });
 
   describe("onWillDisappear", () => {
-    it("should clean up without error", () => {
-      const action = new WorkerAnalytics();
-      expect(() => action.onWillDisappear({} as any)).not.toThrow();
+    it("should clean up without error", () => { expect(() => action.onWillDisappear({} as any)).not.toThrow(); });
+
+    it("should stop polling", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      action.onWillDisappear({} as any);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
     });
   });
 
-  // ── Key Cycling ──────────────────────────────────────────────────────
-
-  describe("key cycling", () => {
-    it("requests → errors", () => {
-      const idx = WORKER_METRIC_CYCLE_ORDER.indexOf("requests");
-      const next = WORKER_METRIC_CYCLE_ORDER[(idx + 1) % WORKER_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("errors");
+  describe("onKeyDown", () => {
+    it("should cycle from requests to errors", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      const keyEv = makeMockEvent(VALID_SETTINGS);
+      await action.onKeyDown(keyEv);
+      expect(keyEv.action.setSettings).toHaveBeenCalledWith(expect.objectContaining({ metric: "errors" }));
     });
 
-    it("errors → error_rate", () => {
-      const idx = WORKER_METRIC_CYCLE_ORDER.indexOf("errors");
-      const next = WORKER_METRIC_CYCLE_ORDER[(idx + 1) % WORKER_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("error_rate");
+    it("should use cached data", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onKeyDown(makeMockEvent(VALID_SETTINGS));
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
     });
 
-    it("error_rate → cpu_p50", () => {
-      const idx = WORKER_METRIC_CYCLE_ORDER.indexOf("error_rate");
-      const next = WORKER_METRIC_CYCLE_ORDER[(idx + 1) % WORKER_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("cpu_p50");
+    it("should do nothing when incomplete", async () => {
+      vi.mocked(getGlobalSettings).mockReturnValue({});
+      const ev = makeMockEvent({});
+      await action.onKeyDown(ev);
+      expect(ev.action.setSettings).not.toHaveBeenCalled();
     });
 
-    it("cpu_p50 → cpu_p99", () => {
-      const idx = WORKER_METRIC_CYCLE_ORDER.indexOf("cpu_p50");
-      const next = WORKER_METRIC_CYCLE_ORDER[(idx + 1) % WORKER_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("cpu_p99");
+    it("should set pendingKeyCycle flag", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onKeyDown(makeMockEvent(VALID_SETTINGS));
+      const settingsEv = makeMockEvent({ ...VALID_SETTINGS, metric: "errors" });
+      await action.onDidReceiveSettings(settingsEv);
+      expect(settingsEv.action.setImage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("error back-off", () => {
+    it("should keep cached display when refresh fails", async () => {
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Rate limited"));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(ev.action.setImage).not.toHaveBeenCalled();
     });
 
-    it("cpu_p99 → wall_time", () => {
-      const idx = WORKER_METRIC_CYCLE_ORDER.indexOf("cpu_p99");
-      const next = WORKER_METRIC_CYCLE_ORDER[(idx + 1) % WORKER_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("wall_time");
+    it("should show ERR only when no cache", async () => {
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[1][0])).toContain("ERR");
+    });
+  });
+
+  describe("marquee", () => {
+    const LONG_SETTINGS = { ...VALID_SETTINGS, workerName: "production-worker" };
+
+    it("should scroll for long names", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(LONG_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(ev.action.setImage.mock.calls.length).toBeGreaterThan(0);
     });
 
-    it("wall_time → subrequests", () => {
-      const idx = WORKER_METRIC_CYCLE_ORDER.indexOf("wall_time");
-      const next = WORKER_METRIC_CYCLE_ORDER[(idx + 1) % WORKER_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("subrequests");
+    it("should not start for short names", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(ev.action.setImage).not.toHaveBeenCalled();
     });
 
-    it("subrequests → requests (wraps)", () => {
-      const idx = WORKER_METRIC_CYCLE_ORDER.indexOf("subrequests");
-      const next = WORKER_METRIC_CYCLE_ORDER[(idx + 1) % WORKER_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("requests");
+    it("should stop on disappear", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(LONG_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      action.onWillDisappear(ev);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(ev.action.setImage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("global settings change", () => {
+    it("should re-initialize when credentials change", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics({ requests: 999 }));
+      await capturedGlobalListener!({ apiToken: "new-token", accountId: "new-account" });
+      expect(ev.action.setImage).toHaveBeenCalled();
     });
 
-    it("cycle order should have 7 metrics", () => {
-      expect(WORKER_METRIC_CYCLE_ORDER).toHaveLength(7);
+    it("should show setup when credentials removed", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      vi.mocked(getGlobalSettings).mockReturnValue({});
+      await capturedGlobalListener!({});
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
     });
   });
 });

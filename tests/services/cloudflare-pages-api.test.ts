@@ -8,9 +8,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   CloudflarePagesApi,
-  formatTimeAgo,
   truncateProjectName,
 } from "../../src/services/cloudflare-pages-api";
+import { formatTimeAgo } from "../../src/services/key-image-renderer";
 import type { PagesDeployment } from "../../src/types/cloudflare-pages";
 
 // Mock the global fetch function
@@ -287,31 +287,31 @@ describe("formatTimeAgo", () => {
   const fixedNow = new Date("2025-06-15T12:00:00Z").getTime();
 
   it("should show seconds for recent times", () => {
-    const result = formatTimeAgo("2025-06-15T11:59:30Z", fixedNow);
+    const result = formatTimeAgo("2025-06-15T11:59:30Z", { now: fixedNow });
     expect(result).toBe("30s ago");
   });
 
   it("should show minutes", () => {
-    const result = formatTimeAgo("2025-06-15T11:55:00Z", fixedNow);
+    const result = formatTimeAgo("2025-06-15T11:55:00Z", { now: fixedNow });
     expect(result).toBe("5m ago");
   });
 
   it("should show hours", () => {
-    const result = formatTimeAgo("2025-06-15T09:00:00Z", fixedNow);
+    const result = formatTimeAgo("2025-06-15T09:00:00Z", { now: fixedNow });
     expect(result).toBe("3h ago");
   });
 
   it("should show days", () => {
-    const result = formatTimeAgo("2025-06-13T12:00:00Z", fixedNow);
+    const result = formatTimeAgo("2025-06-13T12:00:00Z", { now: fixedNow });
     expect(result).toBe("2d ago");
   });
 
   it("should return empty string for invalid date", () => {
-    expect(formatTimeAgo("invalid", fixedNow)).toBe("");
+    expect(formatTimeAgo("invalid", { now: fixedNow })).toBe("");
   });
 
-  it("should return 'now' for future dates", () => {
-    expect(formatTimeAgo("2025-06-16T12:00:00Z", fixedNow)).toBe("now");
+  it("should return 'just now' for future dates", () => {
+    expect(formatTimeAgo("2025-06-16T12:00:00Z", { now: fixedNow })).toBe("just now");
   });
 });
 

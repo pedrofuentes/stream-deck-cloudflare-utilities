@@ -5,6 +5,20 @@
 
 ---
 
+## v1.2.1 (February 2026)
+
+**Code quality & reliability improvements**
+
+• Unified time display — Consolidated 3 separate "time ago" formatting functions into one shared utility with style options.
+• Test coverage boost — Comprehensive test rewrites across all 10 actions. Coverage increased from 65% to 94% (1,081 tests, all passing).
+• Code cleanup — Removed unused imports and standardized test patterns across all action files.
+
+No user-facing changes — this release improves code quality, test coverage, and long-term maintainability.
+
+**Character count**: ~440
+
+---
+
 ## v1.2.0 (February 2026)
 
 **Massive expansion — 6 new actions + visual polish!**

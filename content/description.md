@@ -1,6 +1,6 @@
 # Elgato Marketplace — Plugin Description
 
-> **Last updated**: v1.2.0 (February 2026)
+> **Last updated**: v1.2.1 (February 2026)
 > **Character limit**: 4,000 characters
 > **Current length**: ~3,800 characters
 

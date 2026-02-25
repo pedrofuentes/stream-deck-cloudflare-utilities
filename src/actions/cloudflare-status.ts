@@ -18,33 +18,9 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 
 import { CloudflareApiClient } from "../services/cloudflare-api-client";
-import { renderKeyImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE3_MAX_CHARS } from "../services/key-image-renderer";
+import { renderKeyImage, STATUS_COLORS, LINE1_MAX_CHARS, formatTimeAgo } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
-
-/**
- * Formats a timestamp as a short relative-time string for line 3.
- * Output fits within LINE3_MAX_CHARS (13 chars).
- *
- * Examples: "just now", "30s ago", "2m ago", "1h ago", "3h ago"
- */
-export function formatTimeAgo(timestamp: number, now: number = Date.now()): string {
-  const diffMs = now - timestamp;
-  if (diffMs < 0) return "just now";
-
-  const seconds = Math.floor(diffMs / 1000);
-  if (seconds < 10) return "just now";
-  if (seconds < 60) return `${seconds}s ago`;
-
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
 
 /**
  * Cloudflare Status action - displays the current Cloudflare system status

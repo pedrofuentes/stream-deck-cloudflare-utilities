@@ -51,6 +51,68 @@ export function truncateForDisplay(text: string, maxChars: number): string {
   return text.slice(0, maxChars - 1) + "…";
 }
 
+// ── Time Formatting ────────────────────────────────────────────────────────
+
+/**
+ * Options for {@link formatTimeAgo}.
+ */
+export type FormatTimeAgoOptions = {
+  /** Current time in ms since epoch (default: `Date.now()`). Injectable for testing. */
+  now?: number;
+  /**
+   * Output style:
+   * - `"compact"` → `"2m"`, `"1h"`, `"3d"`, `"2w"` (good for line 2)
+   * - `"long"`    → `"2m ago"`, `"1h ago"`, `"3d ago"` (good for line 3)
+   *
+   * Default: `"long"`
+   */
+  style?: "compact" | "long";
+};
+
+/**
+ * Formats a time reference as a relative-time string for key display.
+ *
+ * Accepts either a numeric timestamp (ms since epoch) or an ISO 8601 string.
+ *
+ * @example
+ *   formatTimeAgo(Date.now() - 5_000)               // "just now"
+ *   formatTimeAgo("2026-02-24T10:00:00Z")            // "2h ago"
+ *   formatTimeAgo("2026-02-24T10:00:00Z", { style: "compact" }) // "2h"
+ */
+export function formatTimeAgo(
+  time: number | string,
+  options: FormatTimeAgoOptions = {},
+): string {
+  const { now = Date.now(), style = "long" } = options;
+
+  const timestamp = typeof time === "string" ? new Date(time).getTime() : time;
+  if (isNaN(timestamp)) return style === "compact" ? "??" : "";
+
+  const diffMs = now - timestamp;
+  if (diffMs < 0) return style === "compact" ? "now" : "just now";
+
+  const seconds = Math.floor(diffMs / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  const weeks = Math.floor(days / 7);
+
+  if (style === "compact") {
+    if (weeks > 0) return `${weeks}w`;
+    if (days > 0) return `${days}d`;
+    if (hours > 0) return `${hours}h`;
+    if (minutes > 0) return `${minutes}m`;
+    return `${seconds}s`;
+  }
+
+  // "long" style — includes " ago" suffix and "just now" for very recent
+  if (seconds < 10) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export type KeyImageOptions = {

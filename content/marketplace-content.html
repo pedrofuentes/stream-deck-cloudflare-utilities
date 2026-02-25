@@ -125,7 +125,8 @@
   <h2 class="section-label">Release Notes (max 1,500 characters each) — copy the version you need</h2>
 
   <div class="tab-bar">
-    <div class="tab active" onclick="showTab('v120')">v1.2.0</div>
+    <div class="tab active" onclick="showTab('v121')">v1.2.1</div>
+    <div class="tab" onclick="showTab('v120')">v1.2.0</div>
     <div class="tab" onclick="showTab('v113')">v1.1.3</div>
     <div class="tab" onclick="showTab('v112')">v1.1.2</div>
     <div class="tab" onclick="showTab('v111')">v1.1.1</div>
@@ -133,8 +134,24 @@
     <div class="tab" onclick="showTab('v100')">v1.0.0</div>
   </div>
 
+  <!-- v1.2.1 -->
+  <div class="tab-content active" id="tab-v121">
+    <div class="content">
+
+<p><b>Code quality &amp; reliability improvements</b></p>
+<ul>
+  <li><b>Unified time display</b> — Consolidated 3 separate "time ago" formatting functions into one shared utility with style options.</li>
+  <li><b>Test coverage boost</b> — Comprehensive test rewrites across all 10 actions. Coverage increased from 65% to 94% (1,081 tests, all passing).</li>
+  <li><b>Code cleanup</b> — Removed unused imports and standardized test patterns across all action files.</li>
+</ul>
+<p>No user-facing changes — this release improves code quality, test coverage, and long-term maintainability.</p>
+
+    </div>
+    <div class="char-count" id="count-v121"></div>
+  </div>
+
   <!-- v1.2.0 -->
-  <div class="tab-content active" id="tab-v120">
+  <div class="tab-content" id="tab-v120">
     <div class="content">
 
 <p><b>Massive expansion — 6 new actions + visual polish!</b></p>
@@ -275,7 +292,7 @@
   countChars('description', 'desc-count');
 
   // Count each release note
-  ['v120','v113','v112','v111','v110','v100'].forEach(v => {
+  ['v121','v120','v113','v112','v111','v110','v100'].forEach(v => {
     const tab = document.getElementById('tab-' + v);
     if (!tab) return;
     const content = tab.querySelector('.content');

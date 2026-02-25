@@ -8,9 +8,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   CloudflareWorkersApi,
-  formatTimeAgo,
   truncateWorkerName,
 } from "../../src/services/cloudflare-workers-api";
+import { formatTimeAgo } from "../../src/services/key-image-renderer";
 import type {
   WorkerDeployment,
   WorkerDeploymentsApiResponse,
@@ -668,76 +668,77 @@ describe("CloudflareWorkersApi", () => {
 describe("formatTimeAgo", () => {
   // Fixed "now" for deterministic tests: 2025-01-15T12:00:00.000Z
   const NOW = new Date("2025-01-15T12:00:00Z").getTime();
+  const compact = { style: "compact" as const, now: NOW };
 
   it("should return seconds for very recent times", () => {
     const thirtySecsAgo = new Date("2025-01-15T11:59:30Z").toISOString();
-    expect(formatTimeAgo(thirtySecsAgo, NOW)).toBe("30s");
+    expect(formatTimeAgo(thirtySecsAgo, compact)).toBe("30s");
   });
 
   it("should return '0s' for exactly now", () => {
     const now = new Date("2025-01-15T12:00:00Z").toISOString();
-    expect(formatTimeAgo(now, NOW)).toBe("0s");
+    expect(formatTimeAgo(now, compact)).toBe("0s");
   });
 
   it("should return minutes", () => {
     const fiveMinAgo = new Date("2025-01-15T11:55:00Z").toISOString();
-    expect(formatTimeAgo(fiveMinAgo, NOW)).toBe("5m");
+    expect(formatTimeAgo(fiveMinAgo, compact)).toBe("5m");
   });
 
   it("should return hours", () => {
     const threeHoursAgo = new Date("2025-01-15T09:00:00Z").toISOString();
-    expect(formatTimeAgo(threeHoursAgo, NOW)).toBe("3h");
+    expect(formatTimeAgo(threeHoursAgo, compact)).toBe("3h");
   });
 
   it("should return days", () => {
     const twoDaysAgo = new Date("2025-01-13T12:00:00Z").toISOString();
-    expect(formatTimeAgo(twoDaysAgo, NOW)).toBe("2d");
+    expect(formatTimeAgo(twoDaysAgo, compact)).toBe("2d");
   });
 
   it("should return weeks", () => {
     const twoWeeksAgo = new Date("2025-01-01T12:00:00Z").toISOString();
-    expect(formatTimeAgo(twoWeeksAgo, NOW)).toBe("2w");
+    expect(formatTimeAgo(twoWeeksAgo, compact)).toBe("2w");
   });
 
   it("should return '??' for invalid date string", () => {
-    expect(formatTimeAgo("not-a-date", NOW)).toBe("??");
+    expect(formatTimeAgo("not-a-date", compact)).toBe("??");
   });
 
   it("should return '??' for empty string", () => {
-    expect(formatTimeAgo("", NOW)).toBe("??");
+    expect(formatTimeAgo("", compact)).toBe("??");
   });
 
   it("should return 'now' for a future date", () => {
     const future = new Date("2025-01-16T12:00:00Z").toISOString();
-    expect(formatTimeAgo(future, NOW)).toBe("now");
+    expect(formatTimeAgo(future, compact)).toBe("now");
   });
 
   it("should use Date.now() by default when now parameter is not provided", () => {
     // Use a date far enough in the past that it's consistent regardless of when the test runs
     const longAgo = new Date("2020-01-01T00:00:00Z").toISOString();
-    const result = formatTimeAgo(longAgo);
+    const result = formatTimeAgo(longAgo, { style: "compact" });
     // Should return weeks (it's been many weeks since Jan 2020)
     expect(result).toMatch(/^\d+w$/);
   });
 
   it("should return '1m' at the 60-second boundary", () => {
     const sixtySecsAgo = new Date("2025-01-15T11:59:00Z").toISOString();
-    expect(formatTimeAgo(sixtySecsAgo, NOW)).toBe("1m");
+    expect(formatTimeAgo(sixtySecsAgo, compact)).toBe("1m");
   });
 
   it("should return '1h' at the 60-minute boundary", () => {
     const sixtyMinsAgo = new Date("2025-01-15T11:00:00Z").toISOString();
-    expect(formatTimeAgo(sixtyMinsAgo, NOW)).toBe("1h");
+    expect(formatTimeAgo(sixtyMinsAgo, compact)).toBe("1h");
   });
 
   it("should return '1d' at the 24-hour boundary", () => {
     const twentyFourHoursAgo = new Date("2025-01-14T12:00:00Z").toISOString();
-    expect(formatTimeAgo(twentyFourHoursAgo, NOW)).toBe("1d");
+    expect(formatTimeAgo(twentyFourHoursAgo, compact)).toBe("1d");
   });
 
   it("should return '1w' at the 7-day boundary", () => {
     const sevenDaysAgo = new Date("2025-01-08T12:00:00Z").toISOString();
-    expect(formatTimeAgo(sevenDaysAgo, NOW)).toBe("1w");
+    expect(formatTimeAgo(sevenDaysAgo, compact)).toBe("1w");
   });
 });
 

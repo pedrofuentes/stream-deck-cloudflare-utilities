@@ -17,7 +17,8 @@ import streamDeck, {
   WillDisappearEvent,
 } from "@elgato/streamdeck";
 
-import { CloudflareWorkersApi, formatTimeAgo, truncateWorkerName } from "../services/cloudflare-workers-api";
+import { CloudflareWorkersApi, truncateWorkerName } from "../services/cloudflare-workers-api";
+import { formatTimeAgo } from "../services/key-image-renderer";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
@@ -286,7 +287,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
         });
 
       case "recent": {
-        const timeAgo = status ? formatTimeAgo(status.createdOn) : "";
+        const timeAgo = status ? formatTimeAgo(status.createdOn, { style: "compact" }) : "";
         return renderKeyImage({
           line1: name,
           line2: timeAgo || "Recent",
@@ -296,7 +297,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       }
 
       case "gradual": {
-        const timeAgo = status ? formatTimeAgo(status.createdOn) : "";
+        const timeAgo = status ? formatTimeAgo(status.createdOn, { style: "compact" }) : "";
         return renderKeyImage({
           line1: name,
           line2: timeAgo || "Gradual",
@@ -306,7 +307,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       }
 
       case "live": {
-        const timeAgo = status ? formatTimeAgo(status.createdOn) : "";
+        const timeAgo = status ? formatTimeAgo(status.createdOn, { style: "compact" }) : "";
         return renderKeyImage({
           line1: name,
           line2: timeAgo || "Live",
@@ -400,7 +401,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    */
   private isShowingSeconds(): boolean {
     if (!this.lastStatus) return false;
-    return formatTimeAgo(this.lastStatus.createdOn).endsWith("s");
+    return formatTimeAgo(this.lastStatus.createdOn, { style: "compact" }).endsWith("s");
   }
 
   /**

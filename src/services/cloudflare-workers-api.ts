@@ -196,48 +196,6 @@ export class CloudflareWorkersApi {
 }
 
 /**
- * Formats an ISO 8601 date string into a compact time-ago string.
- *
- * @param isoDate - ISO 8601 datetime string
- * @param now - Current time (defaults to Date.now(), injectable for testing)
- * @returns Compact time-ago string, e.g. "2m", "1h", "3d", "2w"
- */
-export function formatTimeAgo(isoDate: string, now?: number): string {
-  const then = new Date(isoDate).getTime();
-  const currentTime = now ?? Date.now();
-
-  if (isNaN(then)) {
-    return "??";
-  }
-
-  const diffMs = currentTime - then;
-
-  if (diffMs < 0) {
-    return "now";
-  }
-
-  const seconds = Math.floor(diffMs / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-  const weeks = Math.floor(days / 7);
-
-  if (weeks > 0) {
-    return `${weeks}w`;
-  }
-  if (days > 0) {
-    return `${days}d`;
-  }
-  if (hours > 0) {
-    return `${hours}h`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m`;
-  }
-  return `${seconds}s`;
-}
-
-/**
  * Truncates a worker name for display on a Stream Deck key.
  * Delegates to the shared `truncateForDisplay` utility.
  *

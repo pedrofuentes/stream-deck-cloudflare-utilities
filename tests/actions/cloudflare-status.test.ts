@@ -6,7 +6,8 @@
  * @license MIT
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { CloudflareStatus, formatTimeAgo } from "../../src/actions/cloudflare-status";
+import { CloudflareStatus } from "../../src/actions/cloudflare-status";
+import { formatTimeAgo } from "../../src/services/key-image-renderer";
 import { CloudflareApiClient } from "../../src/services/cloudflare-api-client";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
 import { resetPollingCoordinator, getPollingCoordinator } from "../../src/services/polling-coordinator";
@@ -810,36 +811,36 @@ describe("formatTimeAgo", () => {
   const BASE = 1_700_000_000_000; // arbitrary fixed timestamp
 
   it("should return 'just now' for timestamps less than 10 seconds ago", () => {
-    expect(formatTimeAgo(BASE, BASE)).toBe("just now");
-    expect(formatTimeAgo(BASE, BASE + 5_000)).toBe("just now");
-    expect(formatTimeAgo(BASE, BASE + 9_999)).toBe("just now");
+    expect(formatTimeAgo(BASE, { now: BASE })).toBe("just now");
+    expect(formatTimeAgo(BASE, { now: BASE + 5_000 })).toBe("just now");
+    expect(formatTimeAgo(BASE, { now: BASE + 9_999 })).toBe("just now");
   });
 
   it("should return seconds for 10s–59s", () => {
-    expect(formatTimeAgo(BASE, BASE + 10_000)).toBe("10s ago");
-    expect(formatTimeAgo(BASE, BASE + 30_000)).toBe("30s ago");
-    expect(formatTimeAgo(BASE, BASE + 59_000)).toBe("59s ago");
+    expect(formatTimeAgo(BASE, { now: BASE + 10_000 })).toBe("10s ago");
+    expect(formatTimeAgo(BASE, { now: BASE + 30_000 })).toBe("30s ago");
+    expect(formatTimeAgo(BASE, { now: BASE + 59_000 })).toBe("59s ago");
   });
 
   it("should return minutes for 1m–59m", () => {
-    expect(formatTimeAgo(BASE, BASE + 60_000)).toBe("1m ago");
-    expect(formatTimeAgo(BASE, BASE + 120_000)).toBe("2m ago");
-    expect(formatTimeAgo(BASE, BASE + 3_540_000)).toBe("59m ago");
+    expect(formatTimeAgo(BASE, { now: BASE + 60_000 })).toBe("1m ago");
+    expect(formatTimeAgo(BASE, { now: BASE + 120_000 })).toBe("2m ago");
+    expect(formatTimeAgo(BASE, { now: BASE + 3_540_000 })).toBe("59m ago");
   });
 
   it("should return hours for 1h–23h", () => {
-    expect(formatTimeAgo(BASE, BASE + 3_600_000)).toBe("1h ago");
-    expect(formatTimeAgo(BASE, BASE + 7_200_000)).toBe("2h ago");
-    expect(formatTimeAgo(BASE, BASE + 82_800_000)).toBe("23h ago");
+    expect(formatTimeAgo(BASE, { now: BASE + 3_600_000 })).toBe("1h ago");
+    expect(formatTimeAgo(BASE, { now: BASE + 7_200_000 })).toBe("2h ago");
+    expect(formatTimeAgo(BASE, { now: BASE + 82_800_000 })).toBe("23h ago");
   });
 
   it("should return days for 24h+", () => {
-    expect(formatTimeAgo(BASE, BASE + 86_400_000)).toBe("1d ago");
-    expect(formatTimeAgo(BASE, BASE + 172_800_000)).toBe("2d ago");
+    expect(formatTimeAgo(BASE, { now: BASE + 86_400_000 })).toBe("1d ago");
+    expect(formatTimeAgo(BASE, { now: BASE + 172_800_000 })).toBe("2d ago");
   });
 
   it("should return 'just now' for future timestamps", () => {
-    expect(formatTimeAgo(BASE + 5_000, BASE)).toBe("just now");
+    expect(formatTimeAgo(BASE + 5_000, { now: BASE })).toBe("just now");
   });
 
   it("should use Date.now() as default when now is not provided", () => {

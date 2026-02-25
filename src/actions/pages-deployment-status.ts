@@ -19,12 +19,12 @@ import streamDeck, {
 
 import {
   CloudflarePagesApi,
-  formatTimeAgo,
+
   truncateProjectName,
   type PagesDeploymentStatus as PagesDeployStatus,
 } from "../services/cloudflare-pages-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
-import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
+import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay, formatTimeAgo } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
 import type { PagesDeploymentSettings } from "../types/cloudflare-pages";

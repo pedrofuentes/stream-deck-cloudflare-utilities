@@ -13,16 +13,28 @@ import {
   formatMetricValue,
 } from "../../src/actions/zone-analytics";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
+import { getGlobalSettings, onGlobalSettingsChanged } from "../../src/services/global-settings-store";
+import { resetPollingCoordinator, getPollingCoordinator } from "../../src/services/polling-coordinator";
 import type {
   ZoneAnalyticsMetrics,
   ZoneAnalyticsMetricType,
 } from "../../src/types/cloudflare-zone-analytics";
 import { ZONE_METRIC_CYCLE_ORDER } from "../../src/types/cloudflare-zone-analytics";
 
-// Mock @elgato/streamdeck
+// ── Mocks ────────────────────────────────────────────────────────────────────
+
+let capturedGlobalListener: ((settings: Record<string, unknown>) => void) | null = null;
+vi.mock("../../src/services/global-settings-store", () => ({
+  getGlobalSettings: vi.fn(),
+  onGlobalSettingsChanged: vi.fn().mockImplementation((fn: (settings: Record<string, unknown>) => void) => {
+    capturedGlobalListener = fn;
+    return vi.fn();
+  }),
+}));
+
 vi.mock("@elgato/streamdeck", () => ({
   default: {
-    logger: { error: vi.fn(), debug: vi.fn(), setLevel: vi.fn() },
+    logger: { debug: vi.fn(), error: vi.fn(), setLevel: vi.fn() },
     actions: { registerAction: vi.fn() },
     connect: vi.fn(),
   },
@@ -30,27 +42,27 @@ vi.mock("@elgato/streamdeck", () => ({
   SingletonAction: class {},
 }));
 
-// Mock the global settings store
-vi.mock("../../src/services/global-settings-store", () => ({
-  getGlobalSettings: vi.fn(() => ({
-    apiToken: "mock-token",
-    accountId: "mock-account-id",
-  })),
-  onGlobalSettingsChanged: vi.fn(() => vi.fn()),
-}));
+let mockGetAnalytics: ReturnType<typeof vi.fn>;
+
+vi.mock("../../src/services/cloudflare-zone-analytics-api", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("../../src/services/cloudflare-zone-analytics-api")>();
+  return {
+    ...orig,
+    CloudflareZoneAnalyticsApi: class MockCloudflareZoneAnalyticsApi {
+      constructor() { this.getAnalytics = mockGetAnalytics; }
+      getAnalytics: ReturnType<typeof vi.fn>;
+    },
+  };
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockEvent(
-  settings: Record<string, unknown> = {},
-  overrides: Record<string, unknown> = {}
-) {
+function makeMockEvent(settings: Record<string, unknown> = {}) {
   return {
     payload: { settings },
     action: {
       setImage: vi.fn().mockResolvedValue(undefined),
       setSettings: vi.fn().mockResolvedValue(undefined),
-      ...overrides,
     },
   } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
@@ -71,283 +83,309 @@ function decodeSvg(dataUri: string): string {
   return decodeURIComponent(dataUri.slice(prefix.length));
 }
 
+const VALID_SETTINGS = {
+  zoneId: "zone-123",
+  zoneName: "example.co",
+  metric: "requests" as const,
+  timeRange: "24h" as const,
+};
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
+describe("truncateZoneName", () => {
+  it("should return names ≤ 10 chars unchanged", () => { expect(truncateZoneName("example.co")).toBe("example.co"); });
+  it("should truncate names > 10 chars", () => { expect(truncateZoneName("mywebsite.example.com")).toBe("mywebsite…"); });
+  it("should handle empty string", () => { expect(truncateZoneName("")).toBe(""); });
+});
+
+describe("metricColor", () => {
+  it("should return blue for requests", () => { expect(metricColor("requests")).toBe(STATUS_COLORS.blue); });
+  it("should return blue for bandwidth", () => { expect(metricColor("bandwidth")).toBe(STATUS_COLORS.blue); });
+  it("should return green for cache_rate", () => { expect(metricColor("cache_rate")).toBe(STATUS_COLORS.green); });
+  it("should return red for threats", () => { expect(metricColor("threats")).toBe(STATUS_COLORS.red); });
+  it("should return amber for visitors", () => { expect(metricColor("visitors")).toBe(STATUS_COLORS.amber); });
+  it("should return gray for unknown", () => { expect(metricColor("unknown" as ZoneAnalyticsMetricType)).toBe(STATUS_COLORS.gray); });
+});
+
+describe("formatMetricValue", () => {
+  const metrics = makeMetrics();
+  it("should format requests", () => { expect(formatMetricValue("requests", metrics)).toBe("50K"); });
+  it("should format bandwidth as bytes", () => { expect(formatMetricValue("bandwidth", metrics)).toBe("10MB"); });
+  it("should format cache_rate as percentage", () => { expect(formatMetricValue("cache_rate", metrics)).toBe("50%"); });
+  it("should format cache_rate as 0% when no bandwidth", () => { expect(formatMetricValue("cache_rate", makeMetrics({ bandwidth: 0 }))).toBe("0%"); });
+  it("should format threats", () => { expect(formatMetricValue("threats", metrics)).toBe("15"); });
+  it("should format visitors", () => { expect(formatMetricValue("visitors", metrics)).toBe("1.2K"); });
+  it("should return N/A for unknown", () => { expect(formatMetricValue("unknown" as ZoneAnalyticsMetricType, metrics)).toBe("N/A"); });
+  it("should format zero values", () => {
+    const zeros = makeMetrics({ requests: 0, bandwidth: 0, cachedBytes: 0, threats: 0, visitors: 0 });
+    expect(formatMetricValue("requests", zeros)).toBe("0");
+    expect(formatMetricValue("bandwidth", zeros)).toBe("0B");
+    expect(formatMetricValue("cache_rate", zeros)).toBe("0%");
+    expect(formatMetricValue("threats", zeros)).toBe("0");
+    expect(formatMetricValue("visitors", zeros)).toBe("0");
+  });
+});
+
+describe("key cycling order", () => {
+  it("requests → bandwidth", () => { expect(ZONE_METRIC_CYCLE_ORDER[(ZONE_METRIC_CYCLE_ORDER.indexOf("requests") + 1) % ZONE_METRIC_CYCLE_ORDER.length]).toBe("bandwidth"); });
+  it("bandwidth → cache_rate", () => { expect(ZONE_METRIC_CYCLE_ORDER[(ZONE_METRIC_CYCLE_ORDER.indexOf("bandwidth") + 1) % ZONE_METRIC_CYCLE_ORDER.length]).toBe("cache_rate"); });
+  it("cache_rate → threats", () => { expect(ZONE_METRIC_CYCLE_ORDER[(ZONE_METRIC_CYCLE_ORDER.indexOf("cache_rate") + 1) % ZONE_METRIC_CYCLE_ORDER.length]).toBe("threats"); });
+  it("threats → visitors", () => { expect(ZONE_METRIC_CYCLE_ORDER[(ZONE_METRIC_CYCLE_ORDER.indexOf("threats") + 1) % ZONE_METRIC_CYCLE_ORDER.length]).toBe("visitors"); });
+  it("visitors → requests (wraps)", () => { expect(ZONE_METRIC_CYCLE_ORDER[(ZONE_METRIC_CYCLE_ORDER.indexOf("visitors") + 1) % ZONE_METRIC_CYCLE_ORDER.length]).toBe("requests"); });
+  it("should have 5 metrics", () => { expect(ZONE_METRIC_CYCLE_ORDER).toHaveLength(5); });
+});
+
 describe("ZoneAnalytics", () => {
-  // ── truncateZoneName ─────────────────────────────────────────────────
+  let action: ZoneAnalytics;
 
-  describe("truncateZoneName", () => {
-    it("should return names ≤ 10 chars unchanged", () => {
-      expect(truncateZoneName("example.co")).toBe("example.co");
-    });
-
-    it("should truncate and add ellipsis for names > 10 chars", () => {
-      expect(truncateZoneName("mywebsite.example.com")).toBe("mywebsite…");
-    });
-
-    it("should handle empty string", () => {
-      expect(truncateZoneName("")).toBe("");
-    });
+  beforeEach(() => {
+    action = new ZoneAnalytics();
+    mockGetAnalytics = vi.fn();
+    capturedGlobalListener = null;
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token", accountId: "test-account" });
+    vi.useFakeTimers();
   });
 
-  // ── metricColor ──────────────────────────────────────────────────────
-
-  describe("metricColor", () => {
-    it("should return blue for requests", () => {
-      expect(metricColor("requests")).toBe(STATUS_COLORS.blue);
-    });
-
-    it("should return blue for bandwidth", () => {
-      expect(metricColor("bandwidth")).toBe(STATUS_COLORS.blue);
-    });
-
-    it("should return green for cache_rate", () => {
-      expect(metricColor("cache_rate")).toBe(STATUS_COLORS.green);
-    });
-
-    it("should return red for threats", () => {
-      expect(metricColor("threats")).toBe(STATUS_COLORS.red);
-    });
-
-    it("should return amber for visitors", () => {
-      expect(metricColor("visitors")).toBe(STATUS_COLORS.amber);
-    });
-
-    it("should return gray for unknown metric", () => {
-      expect(metricColor("unknown" as ZoneAnalyticsMetricType)).toBe(STATUS_COLORS.gray);
-    });
+  afterEach(() => {
+    resetPollingCoordinator();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  // ── formatMetricValue ────────────────────────────────────────────────
-
-  describe("formatMetricValue", () => {
-    const metrics = makeMetrics();
-
-    it("should format requests as compact number", () => {
-      expect(formatMetricValue("requests", metrics)).toBe("50K");
-    });
-
-    it("should format bandwidth as bytes", () => {
-      // 10485760 = 10 MB
-      expect(formatMetricValue("bandwidth", metrics)).toBe("10MB");
-    });
-
-    it("should format cache_rate as percentage", () => {
-      // 5242880 / 10485760 = 50%
-      expect(formatMetricValue("cache_rate", metrics)).toBe("50%");
-    });
-
-    it("should format cache_rate as 0% when no bandwidth", () => {
-      expect(formatMetricValue("cache_rate", makeMetrics({ bandwidth: 0 }))).toBe("0%");
-    });
-
-    it("should format threats as compact number", () => {
-      expect(formatMetricValue("threats", metrics)).toBe("15");
-    });
-
-    it("should format visitors as compact number", () => {
-      expect(formatMetricValue("visitors", metrics)).toBe("1.2K");
-    });
-
-    it("should return N/A for unknown metric", () => {
-      expect(formatMetricValue("unknown" as ZoneAnalyticsMetricType, metrics)).toBe("N/A");
-    });
-
-    it("should format zero values correctly", () => {
-      const zeros = makeMetrics({
-        requests: 0,
-        bandwidth: 0,
-        cachedBytes: 0,
-        threats: 0,
-        visitors: 0,
-      });
-      expect(formatMetricValue("requests", zeros)).toBe("0");
-      expect(formatMetricValue("bandwidth", zeros)).toBe("0B");
-      expect(formatMetricValue("cache_rate", zeros)).toBe("0%");
-      expect(formatMetricValue("threats", zeros)).toBe("0");
-      expect(formatMetricValue("visitors", zeros)).toBe("0");
-    });
+  describe("hasRequiredSettings", () => {
+    it("should return true with apiToken and zoneId", () => { expect(action.hasRequiredSettings({ zoneId: "z1" }, { apiToken: "t" })).toBe(true); });
+    it("should return false without zoneId", () => { expect(action.hasRequiredSettings({}, { apiToken: "t" })).toBe(false); });
+    it("should return false without apiToken", () => { expect(action.hasRequiredSettings({ zoneId: "z1" }, {})).toBe(false); });
   });
 
-  // ── renderMetric ─────────────────────────────────────────────────────
+  describe("hasCredentials", () => {
+    it("should return true with apiToken", () => { expect(action.hasCredentials({ apiToken: "t" })).toBe(true); });
+    it("should return false without apiToken", () => { expect(action.hasCredentials({})).toBe(false); });
+  });
 
   describe("renderMetric", () => {
-    let action: ZoneAnalytics;
-
-    beforeEach(() => {
-      action = new ZoneAnalytics();
-    });
-
-    it("should return a data URI", () => {
-      const result = action.renderMetric("requests", "myzone", makeMetrics(), "24h");
-      expect(result).toMatch(/^data:image\/svg\+xml,/);
-    });
-
-    it("should include zone name in SVG", () => {
-      const svg = decodeSvg(action.renderMetric("requests", "myzone", makeMetrics(), "24h"));
-      expect(svg).toContain("myzone");
-    });
-
-    it("should include formatted metric value", () => {
-      const svg = decodeSvg(action.renderMetric("requests", "z", makeMetrics(), "24h"));
-      expect(svg).toContain("50K");
-    });
-
-    it("should include metric label and time range", () => {
-      const svg = decodeSvg(action.renderMetric("threats", "z", makeMetrics(), "7d"));
-      expect(svg).toContain("threats 7d");
-    });
-
-    it("should use correct color for threats", () => {
-      const svg = decodeSvg(action.renderMetric("threats", "z", makeMetrics(), "24h"));
-      expect(svg).toContain(STATUS_COLORS.red);
-    });
-
+    it("should return a data URI", () => { expect(action.renderMetric("requests", "myzone", makeMetrics(), "24h")).toMatch(/^data:image\/svg\+xml,/); });
+    it("should include zone name", () => { expect(decodeSvg(action.renderMetric("requests", "myzone", makeMetrics(), "24h"))).toContain("myzone"); });
+    it("should include metric value", () => { expect(decodeSvg(action.renderMetric("requests", "z", makeMetrics(), "24h"))).toContain("50K"); });
+    it("should include label and time range", () => { expect(decodeSvg(action.renderMetric("threats", "z", makeMetrics(), "7d"))).toContain("threats 7d"); });
+    it("should use correct color", () => { expect(decodeSvg(action.renderMetric("threats", "z", makeMetrics(), "24h"))).toContain(STATUS_COLORS.red); });
     it("should use displayName when provided", () => {
-      const svg = decodeSvg(
-        action.renderMetric("requests", "longzonename", makeMetrics(), "24h", "short")
-      );
+      const svg = decodeSvg(action.renderMetric("requests", "longzonename", makeMetrics(), "24h", "short"));
       expect(svg).toContain("short");
       expect(svg).not.toContain("longzonename");
     });
-
-    it("should use zoneName for display instead of raw zone ID", () => {
-      const svg = decodeSvg(
-        action.renderMetric("requests", "mysite.co", makeMetrics(), "24h")
-      );
-      expect(svg).toContain("mysite.co");
-    });
+    it("should default to 24h", () => { expect(decodeSvg(action.renderMetric("requests", "z", makeMetrics()))).toContain("reqs 24h"); });
   });
 
-  // ── hasRequiredSettings ──────────────────────────────────────────────
-
-  describe("hasRequiredSettings", () => {
-    let action: ZoneAnalytics;
-
-    beforeEach(() => {
-      action = new ZoneAnalytics();
+  describe("coordinator polling", () => {
+    it("should subscribe on appear", async () => {
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      expect(getPollingCoordinator().subscriberCount).toBeGreaterThanOrEqual(1);
     });
 
-    it("should return true when all settings present", () => {
-      expect(
-        action.hasRequiredSettings({ zoneId: "z1" }, { apiToken: "t" })
-      ).toBe(true);
+    it("should set error state after error", async () => {
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      expect((action as any).isErrorState).toBe(true);
     });
 
-    it("should return false when zoneId is missing", () => {
-      expect(action.hasRequiredSettings({}, { apiToken: "t" })).toBe(false);
-    });
-
-    it("should return false when apiToken is missing", () => {
-      expect(action.hasRequiredSettings({ zoneId: "z1" }, {})).toBe(false);
-    });
-  });
-
-  // ── hasCredentials ───────────────────────────────────────────────────
-
-  describe("hasCredentials", () => {
-    let action: ZoneAnalytics;
-
-    beforeEach(() => {
-      action = new ZoneAnalytics();
-    });
-
-    it("should return true when apiToken present", () => {
-      expect(action.hasCredentials({ apiToken: "t" })).toBe(true);
-    });
-
-    it("should return false when apiToken is missing", () => {
-      expect(action.hasCredentials({})).toBe(false);
+    it("should reset error state after success", async () => {
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      (action as any).skipUntil = 0;
+      await getPollingCoordinator().tick();
+      expect((action as any).isErrorState).toBe(false);
     });
   });
-
-  // ── Lifecycle ────────────────────────────────────────────────────────
 
   describe("onWillAppear", () => {
-    afterEach(() => {
-      vi.restoreAllMocks();
-      vi.useRealTimers();
-    });
-
     it("should show setup image when credentials missing", async () => {
-      vi.useFakeTimers();
-      const { getGlobalSettings } = await import(
-        "../../src/services/global-settings-store"
-      );
-      (getGlobalSettings as any).mockReturnValueOnce({});
-
-      const action = new ZoneAnalytics();
+      vi.mocked(getGlobalSettings).mockReturnValue({});
       const ev = makeMockEvent({});
-
       await action.onWillAppear(ev);
-
-      expect(ev.action.setImage).toHaveBeenCalledWith(
-        expect.stringContaining("data:image/svg+xml,")
-      );
-      const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
-      expect(svg).toContain("Setup");
-      vi.useRealTimers();
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
     });
 
-    it("should show placeholder when credentials present but zoneId missing", async () => {
-      vi.useFakeTimers();
-
-      const action = new ZoneAnalytics();
+    it("should show placeholder when zoneId missing", async () => {
       const ev = makeMockEvent({});
-
       await action.onWillAppear(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("...");
+    });
 
-      expect(ev.action.setImage).toHaveBeenCalledWith(
-        expect.stringContaining("data:image/svg+xml,")
-      );
-      const svg = decodeSvg(ev.action.setImage.mock.calls[0][0]);
-      expect(svg).toContain("...");
-      vi.useRealTimers();
+    it("should fetch and display metrics", async () => {
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      expect(mockGetAnalytics).toHaveBeenCalledWith("zone-123", "24h");
+      expect(ev.action.setImage).toHaveBeenCalledTimes(2);
+      expect(decodeSvg(ev.action.setImage.mock.calls[1][0])).toContain("50K");
+    });
+
+    it("should show ERR on API failure", async () => {
+      mockGetAnalytics.mockRejectedValueOnce(new Error("API error"));
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[1][0])).toContain("ERR");
+    });
+
+    it("should default metric to requests", async () => {
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      const ev = makeMockEvent({ zoneId: "z1" });
+      await action.onWillAppear(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[1][0])).toContain("reqs 24h");
+    });
+
+    it("should schedule refresh via coordinator", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("onDidReceiveSettings", () => {
+    it("should show setup when credentials removed", async () => {
+      vi.mocked(getGlobalSettings).mockReturnValue({});
+      const ev = makeMockEvent({});
+      await action.onDidReceiveSettings(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
+    });
+
+    it("should reuse cached metrics on metric-only change", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      const ev2 = makeMockEvent({ ...VALID_SETTINGS, metric: "bandwidth" });
+      await action.onDidReceiveSettings(ev2);
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
+      expect(decodeSvg(ev2.action.setImage.mock.calls[0][0])).toContain("10MB");
+    });
+
+    it("should refetch when zoneId changes", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onDidReceiveSettings(makeMockEvent({ ...VALID_SETTINGS, zoneId: "zone-other" }));
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(2);
     });
   });
 
   describe("onWillDisappear", () => {
-    it("should clean up without error", () => {
-      const action = new ZoneAnalytics();
-      expect(() => action.onWillDisappear({} as any)).not.toThrow();
+    it("should clean up without error", () => { expect(() => action.onWillDisappear({} as any)).not.toThrow(); });
+
+    it("should stop polling", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      action.onWillDisappear({} as any);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
     });
   });
 
-  // ── Key Cycling ──────────────────────────────────────────────────────
-
-  describe("key cycling", () => {
-    it("requests → bandwidth", () => {
-      const idx = ZONE_METRIC_CYCLE_ORDER.indexOf("requests");
-      const next = ZONE_METRIC_CYCLE_ORDER[(idx + 1) % ZONE_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("bandwidth");
+  describe("onKeyDown", () => {
+    it("should cycle from requests to bandwidth", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      const keyEv = makeMockEvent(VALID_SETTINGS);
+      await action.onKeyDown(keyEv);
+      expect(keyEv.action.setSettings).toHaveBeenCalledWith(expect.objectContaining({ metric: "bandwidth" }));
     });
 
-    it("bandwidth → cache_rate", () => {
-      const idx = ZONE_METRIC_CYCLE_ORDER.indexOf("bandwidth");
-      const next = ZONE_METRIC_CYCLE_ORDER[(idx + 1) % ZONE_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("cache_rate");
+    it("should use cached data", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onKeyDown(makeMockEvent(VALID_SETTINGS));
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
     });
 
-    it("cache_rate → threats", () => {
-      const idx = ZONE_METRIC_CYCLE_ORDER.indexOf("cache_rate");
-      const next = ZONE_METRIC_CYCLE_ORDER[(idx + 1) % ZONE_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("threats");
+    it("should do nothing when incomplete", async () => {
+      vi.mocked(getGlobalSettings).mockReturnValue({});
+      const ev = makeMockEvent({});
+      await action.onKeyDown(ev);
+      expect(ev.action.setSettings).not.toHaveBeenCalled();
     });
 
-    it("threats → visitors", () => {
-      const idx = ZONE_METRIC_CYCLE_ORDER.indexOf("threats");
-      const next = ZONE_METRIC_CYCLE_ORDER[(idx + 1) % ZONE_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("visitors");
+    it("should set pendingKeyCycle flag", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onKeyDown(makeMockEvent(VALID_SETTINGS));
+      const settingsEv = makeMockEvent({ ...VALID_SETTINGS, metric: "bandwidth" });
+      await action.onDidReceiveSettings(settingsEv);
+      expect(settingsEv.action.setImage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("error back-off", () => {
+    it("should keep cached display when refresh fails", async () => {
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Rate limited"));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(ev.action.setImage).not.toHaveBeenCalled();
     });
 
-    it("visitors → requests (wraps)", () => {
-      const idx = ZONE_METRIC_CYCLE_ORDER.indexOf("visitors");
-      const next = ZONE_METRIC_CYCLE_ORDER[(idx + 1) % ZONE_METRIC_CYCLE_ORDER.length];
-      expect(next).toBe("requests");
+    it("should show ERR only when no cache", async () => {
+      mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      expect(decodeSvg(ev.action.setImage.mock.calls[1][0])).toContain("ERR");
+    });
+  });
+
+  describe("marquee", () => {
+    const LONG_SETTINGS = { ...VALID_SETTINGS, zoneName: "production.example.com" };
+
+    it("should scroll for long names", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(LONG_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(ev.action.setImage.mock.calls.length).toBeGreaterThan(0);
     });
 
-    it("cycle order should have 5 metrics", () => {
-      expect(ZONE_METRIC_CYCLE_ORDER).toHaveLength(5);
+    it("should not start for short names", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(ev.action.setImage).not.toHaveBeenCalled();
+    });
+
+    it("should stop on disappear", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(LONG_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      action.onWillDisappear(ev);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(ev.action.setImage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("global settings change", () => {
+    it("should re-initialize when credentials change", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      mockGetAnalytics.mockResolvedValueOnce(makeMetrics({ requests: 999 }));
+      await capturedGlobalListener!({ apiToken: "new-token" });
+      expect(ev.action.setImage).toHaveBeenCalled();
+    });
+
+    it("should show setup when credentials removed", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      const ev = makeMockEvent(VALID_SETTINGS);
+      await action.onWillAppear(ev);
+      ev.action.setImage.mockClear();
+      vi.mocked(getGlobalSettings).mockReturnValue({});
+      await capturedGlobalListener!({});
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
     });
   });
 });
