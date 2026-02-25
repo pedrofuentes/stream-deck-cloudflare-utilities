@@ -1,8 +1,8 @@
 /**
- * Worker Analytics action for Stream Deck.
+ * Zone Analytics action for Stream Deck.
  *
- * Displays real-time invocation analytics for a Cloudflare Worker with
- * adaptive polling, marquee scrolling, and metric cycling via key press.
+ * Displays real-time HTTP analytics for a Cloudflare zone with
+ * metric cycling via key press.
  *
  * @author Pedro Fuentes <git@pedrofuent.es>
  * @copyright Pedro Pablo Fuentes Schuster
@@ -18,44 +18,47 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 
 import {
-  CloudflareWorkerAnalyticsApi,
-  formatDuration,
-} from "../services/cloudflare-worker-analytics-api";
-import { formatCompactNumber, RateLimitError } from "../services/cloudflare-ai-gateway-api";
+  CloudflareZoneAnalyticsApi,
+  formatBytes,
+} from "../services/cloudflare-zone-analytics-api";
+import { formatCompactNumber } from "../services/cloudflare-ai-gateway-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE2_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
-import { truncateWorkerName } from "../services/cloudflare-workers-api";
+import { RateLimitError } from "../services/cloudflare-ai-gateway-api";
 import type {
-  WorkerAnalyticsSettings,
-  WorkerAnalyticsMetricType,
-  WorkerAnalyticsMetrics,
-} from "../types/cloudflare-worker-analytics";
+  ZoneAnalyticsSettings,
+  ZoneAnalyticsMetricType,
+  ZoneAnalyticsMetrics,
+} from "../types/cloudflare-zone-analytics";
 import {
-  WORKER_METRIC_CYCLE_ORDER,
-  WORKER_METRIC_SHORT_LABELS,
-} from "../types/cloudflare-worker-analytics";
+  ZONE_METRIC_CYCLE_ORDER,
+  ZONE_METRIC_SHORT_LABELS,
+} from "../types/cloudflare-zone-analytics";
+
+/**
+ * Truncates a zone/domain name for display on a tiny OLED key.
+ */
+export function truncateZoneName(name: string): string {
+  return truncateForDisplay(name, LINE1_MAX_CHARS);
+}
 
 /**
  * Returns the accent bar color for a given metric type.
  */
-export function metricColor(metric: WorkerAnalyticsMetricType): string {
+export function metricColor(metric: ZoneAnalyticsMetricType): string {
   switch (metric) {
     case "requests":
       return STATUS_COLORS.blue;
-    case "errors":
-      return STATUS_COLORS.red;
-    case "error_rate":
-      return STATUS_COLORS.red;
-    case "cpu_p50":
+    case "bandwidth":
+      return STATUS_COLORS.blue;
+    case "cache_rate":
       return STATUS_COLORS.green;
-    case "cpu_p99":
+    case "threats":
+      return STATUS_COLORS.red;
+    case "visitors":
       return STATUS_COLORS.amber;
-    case "wall_time":
-      return STATUS_COLORS.blue;
-    case "subrequests":
-      return STATUS_COLORS.blue;
     default:
       return STATUS_COLORS.gray;
   }
@@ -65,96 +68,53 @@ export function metricColor(metric: WorkerAnalyticsMetricType): string {
  * Formats a metric value for display on the key.
  */
 export function formatMetricValue(
-  metric: WorkerAnalyticsMetricType,
-  metrics: WorkerAnalyticsMetrics
+  metric: ZoneAnalyticsMetricType,
+  metrics: ZoneAnalyticsMetrics
 ): string {
   switch (metric) {
     case "requests":
       return formatCompactNumber(metrics.requests);
-    case "errors":
-      return formatCompactNumber(metrics.errors);
-    case "error_rate":
-      if (metrics.requests === 0) return "0%";
-      return `${((metrics.errors / metrics.requests) * 100).toFixed(1).replace(/\.0$/, "")}%`;
-    case "cpu_p50":
-      return formatDuration(metrics.cpuTimeP50);
-    case "cpu_p99":
-      return formatDuration(metrics.cpuTimeP99);
-    case "wall_time":
-      return formatDuration(metrics.wallTime);
-    case "subrequests":
-      return formatCompactNumber(metrics.subrequests);
+    case "bandwidth":
+      return formatBytes(metrics.bandwidth);
+    case "cache_rate":
+      if (metrics.bandwidth === 0) return "0%";
+      return `${((metrics.cachedBytes / metrics.bandwidth) * 100).toFixed(1).replace(/\.0$/, "")}%`;
+    case "threats":
+      return formatCompactNumber(metrics.threats);
+    case "visitors":
+      return formatCompactNumber(metrics.visitors);
     default:
       return "N/A";
   }
 }
 
 /**
- * Worker Analytics action — displays selected analytics metric from a
- * Cloudflare Worker script on a Stream Deck key.
+ * Zone Analytics action — displays selected analytics metric from a
+ * Cloudflare zone on a Stream Deck key.
  *
  * Pressing the key cycles through available metrics:
- *   Requests → Errors → Error Rate → CPU P50 → CPU P99 → Wall Time → Subrequests
- *
- * Color-coded accent bar:
- * - 🔵 Blue   → requests / wall time / subrequests
- * - 🟢 Green  → cpu p50
- * - 🟡 Amber  → cpu p99
- * - 🔴 Red    → errors / error rate
+ *   Requests → Bandwidth → Cache Rate → Threats → Visitors
  */
-@action({ UUID: "com.pedrofuentes.cloudflare-utilities.worker-analytics" })
-export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
-  private apiClient: CloudflareWorkerAnalyticsApi | null = null;
-
-  /**
-   * Fetch generation counter. Incremented before every fetch so stale
-   * async completions can detect they are outdated and skip rendering.
-   */
+@action({ UUID: "com.pedrofuentes.cloudflare-utilities.zone-analytics" })
+export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
+  private apiClient: CloudflareZoneAnalyticsApi | null = null;
   private fetchGeneration = 0;
-
-  /** Cached metrics for display on key press cycling. */
-  private lastMetrics: WorkerAnalyticsMetrics | null = null;
-  private lastWorkerName: string | null = null;
-
-  /** Authoritative display metric — updated by cycle and settings. */
-  private displayMetric: WorkerAnalyticsMetricType = "requests";
-
-  /** Tracks data-affecting settings so metric-only changes skip refetch. */
-  private lastDataSettings: { workerName?: string; timeRange?: string } = {};
-
-  /** Flag for key-press cycle — see AI Gateway Metric pattern. */
+  private lastMetrics: ZoneAnalyticsMetrics | null = null;
+  private lastZoneId: string | null = null;
+  private lastZoneName: string | null = null;
+  private displayMetric: ZoneAnalyticsMetricType = "requests";
+  private lastDataSettings: { zoneId?: string; timeRange?: string } = {};
   private pendingKeyCycle = false;
-
-  /** Stored event reference for re-initialization. */
-  private lastEvent:
-    | WillAppearEvent<WorkerAnalyticsSettings>
-    | DidReceiveSettingsEvent<WorkerAnalyticsSettings>
-    | null = null;
-
-  /** Unsubscribe function for global settings listener. */
+  private lastEvent: WillAppearEvent<ZoneAnalyticsSettings> | DidReceiveSettingsEvent<ZoneAnalyticsSettings> | null = null;
   private unsubscribeGlobal: (() => void) | null = null;
-
-  /** Unsubscribe function for the polling coordinator. */
   private unsubscribeCoordinator: (() => void) | null = null;
-
-  /** Marquee tick interval. */
   private static readonly MARQUEE_INTERVAL_MS = 500;
-
-  /** Marquee controller for scrolling long worker names. */
   private marquee = new MarqueeController(LINE1_MAX_CHARS);
-  /** Marquee animation interval handle. */
   private marqueeInterval: ReturnType<typeof setInterval> | null = null;
-
-  /** Whether the last fetch errored. */
   private isErrorState = false;
-
-  /** Timestamp until which coordinator ticks should be skipped (rate-limit/error). */
   private skipUntil = 0;
 
-  /**
-   * Called when the action appears on the Stream Deck.
-   */
-  override async onWillAppear(ev: WillAppearEvent<WorkerAnalyticsSettings>): Promise<void> {
+  override async onWillAppear(ev: WillAppearEvent<ZoneAnalyticsSettings>): Promise<void> {
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
     this.subscribeToCoordinator();
@@ -172,16 +132,16 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       return;
     }
 
-    this.apiClient = new CloudflareWorkerAnalyticsApi(global.apiToken!, global.accountId!);
-    this.lastDataSettings = { workerName: settings.workerName, timeRange: settings.timeRange };
+    this.apiClient = new CloudflareZoneAnalyticsApi(global.apiToken!);
+    this.lastDataSettings = { zoneId: settings.zoneId, timeRange: settings.timeRange };
     this.displayMetric = settings.metric ?? "requests";
-    this.marquee.setText(settings.workerName ?? "");
+    this.marquee.setText(settings.zoneName ?? settings.zoneId ?? "");
 
     await ev.action.setImage(
       renderKeyImage({
-        line1: truncateWorkerName(settings.workerName ?? ""),
+        line1: truncateZoneName(settings.zoneName ?? settings.zoneId ?? ""),
         line2: "...",
-        line3: WORKER_METRIC_SHORT_LABELS[this.displayMetric] ?? "",
+        line3: ZONE_METRIC_SHORT_LABELS[this.displayMetric] ?? "",
         statusColor: metricColor(this.displayMetric),
       })
     );
@@ -189,12 +149,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     await this.updateMetrics(ev);
   }
 
-  /**
-   * Called when settings are updated via the Property Inspector.
-   */
-  override async onDidReceiveSettings(
-    ev: DidReceiveSettingsEvent<WorkerAnalyticsSettings>
-  ): Promise<void> {
+  override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<ZoneAnalyticsSettings>): Promise<void> {
     this.lastEvent = ev;
 
     const settings = ev.payload.settings;
@@ -203,7 +158,8 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     if (!this.hasCredentials(global)) {
       this.apiClient = null;
       this.lastMetrics = null;
-      this.lastWorkerName = null;
+      this.lastZoneId = null;
+      this.lastZoneName = null;
       this.lastDataSettings = {};
       await ev.action.setImage(renderSetupImage());
       return;
@@ -212,14 +168,15 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     if (!this.hasRequiredSettings(settings, global)) {
       this.apiClient = null;
       this.lastMetrics = null;
-      this.lastWorkerName = null;
+      this.lastZoneId = null;
+      this.lastZoneName = null;
       this.lastDataSettings = {};
       await ev.action.setImage(renderPlaceholderImage());
       return;
     }
 
     const dataChanged =
-      settings.workerName !== this.lastDataSettings.workerName ||
+      settings.zoneId !== this.lastDataSettings.zoneId ||
       settings.timeRange !== this.lastDataSettings.timeRange;
 
     if (this.pendingKeyCycle) {
@@ -233,7 +190,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       await ev.action.setImage(
         this.renderMetric(
           this.displayMetric,
-          this.lastWorkerName ?? "",
+          this.lastZoneName ?? this.lastZoneId ?? "",
           this.lastMetrics,
           settings.timeRange,
           this.marquee.getCurrentText()
@@ -244,17 +201,18 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     }
 
     this.stopMarqueeTimer();
-    this.apiClient = new CloudflareWorkerAnalyticsApi(global.apiToken!, global.accountId!);
+    this.apiClient = new CloudflareZoneAnalyticsApi(global.apiToken!);
     this.lastMetrics = null;
-    this.lastWorkerName = null;
-    this.lastDataSettings = { workerName: settings.workerName, timeRange: settings.timeRange };
-    this.marquee.setText(settings.workerName ?? "");
+    this.lastZoneId = null;
+    this.lastZoneName = null;
+    this.lastDataSettings = { zoneId: settings.zoneId, timeRange: settings.timeRange };
+    this.marquee.setText(settings.zoneName ?? settings.zoneId ?? "");
 
     await ev.action.setImage(
       renderKeyImage({
-        line1: truncateWorkerName(settings.workerName ?? ""),
+        line1: truncateZoneName(settings.zoneName ?? settings.zoneId ?? ""),
         line2: "...",
-        line3: WORKER_METRIC_SHORT_LABELS[this.displayMetric] ?? "",
+        line3: ZONE_METRIC_SHORT_LABELS[this.displayMetric] ?? "",
         statusColor: metricColor(this.displayMetric),
       })
     );
@@ -262,10 +220,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     await this.updateMetrics(ev);
   }
 
-  /**
-   * Called when the action disappears from the Stream Deck.
-   */
-  override onWillDisappear(_ev: WillDisappearEvent<WorkerAnalyticsSettings>): void {
+  override onWillDisappear(_ev: WillDisappearEvent<ZoneAnalyticsSettings>): void {
     if (this.unsubscribeCoordinator) {
       this.unsubscribeCoordinator();
       this.unsubscribeCoordinator = null;
@@ -273,7 +228,8 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     this.stopMarqueeTimer();
     this.apiClient = null;
     this.lastMetrics = null;
-    this.lastWorkerName = null;
+    this.lastZoneId = null;
+    this.lastZoneName = null;
     this.lastDataSettings = {};
     this.pendingKeyCycle = false;
     this.displayMetric = "requests";
@@ -287,10 +243,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     }
   }
 
-  /**
-   * Called when the key is pressed. Cycles to the next metric.
-   */
-  override async onKeyDown(ev: KeyDownEvent<WorkerAnalyticsSettings>): Promise<void> {
+  override async onKeyDown(ev: KeyDownEvent<ZoneAnalyticsSettings>): Promise<void> {
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
@@ -299,9 +252,9 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     }
 
     const currentMetric = this.displayMetric;
-    const currentIndex = WORKER_METRIC_CYCLE_ORDER.indexOf(currentMetric);
-    const nextIndex = (currentIndex + 1) % WORKER_METRIC_CYCLE_ORDER.length;
-    const nextMetric = WORKER_METRIC_CYCLE_ORDER[nextIndex];
+    const currentIndex = ZONE_METRIC_CYCLE_ORDER.indexOf(currentMetric);
+    const nextIndex = (currentIndex + 1) % ZONE_METRIC_CYCLE_ORDER.length;
+    const nextMetric = ZONE_METRIC_CYCLE_ORDER[nextIndex];
 
     this.displayMetric = nextMetric;
 
@@ -309,7 +262,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       await ev.action.setImage(
         this.renderMetric(
           this.displayMetric,
-          this.lastWorkerName ?? "",
+          this.lastZoneName ?? this.lastZoneId ?? "",
           this.lastMetrics,
           settings.timeRange,
           this.marquee.getCurrentText()
@@ -319,26 +272,17 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     }
 
     this.pendingKeyCycle = true;
-    const newSettings: WorkerAnalyticsSettings = { ...settings, metric: nextMetric };
+    const newSettings: ZoneAnalyticsSettings = { ...settings, metric: nextMetric };
     await ev.action.setSettings(newSettings);
   }
 
-  // ── Private Methods ──────────────────────────────────────────────────
-
-  /**
-   * Fetches metrics from the API and updates the key display.
-   * Increments the fetch generation counter to prevent stale renders.
-   */
   private async updateMetrics(
-    ev:
-      | WillAppearEvent<WorkerAnalyticsSettings>
-      | KeyDownEvent<WorkerAnalyticsSettings>
-      | DidReceiveSettingsEvent<WorkerAnalyticsSettings>,
+    ev: WillAppearEvent<ZoneAnalyticsSettings> | KeyDownEvent<ZoneAnalyticsSettings> | DidReceiveSettingsEvent<ZoneAnalyticsSettings>
   ): Promise<void> {
     const gen = ++this.fetchGeneration;
     const settings = ev.payload.settings;
 
-    if (!this.apiClient || !settings.workerName) {
+    if (!this.apiClient || !settings.zoneId) {
       await ev.action.setImage(renderPlaceholderImage());
       return;
     }
@@ -346,20 +290,20 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     const timeRange = settings.timeRange ?? "24h";
 
     try {
-      const metrics = await this.apiClient.getAnalytics(settings.workerName, timeRange);
+      const metrics = await this.apiClient.getAnalytics(settings.zoneId, timeRange);
 
-      // Verify this fetch is still current
       if (this.fetchGeneration !== gen) return;
 
       this.lastMetrics = metrics;
-      this.lastWorkerName = settings.workerName;
+      this.lastZoneId = settings.zoneId;
+      this.lastZoneName = settings.zoneName ?? settings.zoneId;
       this.isErrorState = false;
       this.skipUntil = 0;
 
       await ev.action.setImage(
         this.renderMetric(
           this.displayMetric,
-          settings.workerName,
+          settings.zoneName ?? settings.zoneId ?? "",
           metrics,
           timeRange,
           this.marquee.getCurrentText()
@@ -367,12 +311,10 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       );
       this.startMarqueeIfNeeded();
     } catch (error) {
-      // If stale, silently abort — a newer cycle owns the display
       if (this.fetchGeneration !== gen) return;
 
       this.isErrorState = true;
 
-      // Rate limit: use longer backoff from server hint if available
       if (error instanceof RateLimitError && error.retryAfterSeconds > 0) {
         this.skipUntil = Date.now() + error.retryAfterSeconds * 1000;
       } else {
@@ -381,19 +323,19 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
 
       if (this.lastMetrics) {
         streamDeck.logger.debug(
-          `Transient error for "${settings.workerName}", keeping cached display:`,
+          `Transient error for zone "${settings.zoneId}", keeping cached display:`,
           error instanceof Error ? error.message : error
         );
         return;
       }
 
       streamDeck.logger.error(
-        `Failed to fetch Worker analytics for "${settings.workerName}":`,
+        `Failed to fetch zone analytics for "${settings.zoneId}":`,
         error
       );
       await ev.action.setImage(
         renderKeyImage({
-          line1: truncateWorkerName(settings.workerName),
+          line1: truncateZoneName(settings.zoneName ?? settings.zoneId ?? ""),
           line2: "ERR",
           statusColor: STATUS_COLORS.red,
         })
@@ -401,21 +343,18 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     }
   }
 
-  /**
-   * Renders the key image for a given metric.
-   */
   public renderMetric(
-    metric: WorkerAnalyticsMetricType,
-    workerName: string,
-    metrics: WorkerAnalyticsMetrics,
+    metric: ZoneAnalyticsMetricType,
+    zoneName: string,
+    metrics: ZoneAnalyticsMetrics,
     timeRange?: string,
     displayName?: string
   ): string {
-    const name = displayName ?? truncateWorkerName(workerName);
+    const name = displayName ?? truncateZoneName(zoneName);
     const value = formatMetricValue(metric, metrics);
     const color = metricColor(metric);
     const rangeSuffix = ` ${timeRange ?? "24h"}`;
-    const label = `${WORKER_METRIC_SHORT_LABELS[metric]}${rangeSuffix}`;
+    const label = `${ZONE_METRIC_SHORT_LABELS[metric]}${rangeSuffix}`;
 
     return renderKeyImage({
       line1: name,
@@ -425,43 +364,29 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     });
   }
 
-  /**
-   * Checks whether API credentials (apiToken + accountId) are present.
-   */
   public hasCredentials(
     global?: { apiToken?: string; accountId?: string }
   ): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId);
+    return !!(g.apiToken);
   }
 
-  /**
-   * Checks whether all required settings (credentials + worker name) are present.
-   */
   public hasRequiredSettings(
-    settings: WorkerAnalyticsSettings,
+    settings: ZoneAnalyticsSettings,
     global?: { apiToken?: string; accountId?: string }
   ): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId && settings.workerName);
+    return !!(g.apiToken && settings.zoneId);
   }
 
-  /**
-   * Subscribes to the shared polling coordinator so this action
-   * receives periodic refresh ticks without managing its own timer.
-   */
   private subscribeToCoordinator(): void {
     if (this.unsubscribeCoordinator) return;
     this.unsubscribeCoordinator = getPollingCoordinator().subscribe(
-      "worker-analytics",
+      "zone-analytics",
       () => this.onCoordinatorTick(),
     );
   }
 
-  /**
-   * Called by the polling coordinator on each tick. Skips if
-   * rate-limited or missing configuration.
-   */
   private async onCoordinatorTick(): Promise<void> {
     if (Date.now() < this.skipUntil) return;
     if (!this.apiClient || !this.lastEvent) return;
@@ -473,7 +398,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       if (!this.marqueeInterval) {
         this.marqueeInterval = setInterval(
           () => this.onMarqueeTick(),
-          WorkerAnalytics.MARQUEE_INTERVAL_MS
+          ZoneAnalytics.MARQUEE_INTERVAL_MS
         );
       }
     } else {
@@ -498,7 +423,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     await this.lastEvent.action.setImage(
       this.renderMetric(
         this.displayMetric,
-        this.lastWorkerName ?? "",
+        this.lastZoneId ?? "",
         this.lastMetrics,
         timeRange,
         displayName
@@ -515,7 +440,8 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       this.stopMarqueeTimer();
       this.apiClient = null;
       this.lastMetrics = null;
-      this.lastWorkerName = null;
+      this.lastZoneId = null;
+      this.lastZoneName = null;
       this.lastDataSettings = {};
 
       const ev = this.lastEvent;
@@ -523,7 +449,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       const global = getGlobalSettings();
 
       this.displayMetric = settings.metric ?? this.displayMetric;
-      this.marquee.setText(settings.workerName ?? "");
+      this.marquee.setText(settings.zoneName ?? settings.zoneId ?? "");
 
       if (!this.hasCredentials(global)) {
         await ev.action.setImage(renderSetupImage());
@@ -535,11 +461,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
         return;
       }
 
-      this.apiClient = new CloudflareWorkerAnalyticsApi(
-        global.apiToken!,
-        global.accountId!
-      );
-
+      this.apiClient = new CloudflareZoneAnalyticsApi(global.apiToken!);
       await this.updateMetrics(ev);
     });
   }

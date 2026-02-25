@@ -758,19 +758,19 @@ describe("truncateWorkerName", () => {
   });
 
   it("should return the name unchanged when exactly maxLength", () => {
-    expect(truncateWorkerName("12345678")).toBe("12345678");
+    expect(truncateWorkerName("0123456789")).toBe("0123456789");
   });
 
-  it("should truncate when name exceeds maxLength", () => {
-    expect(truncateWorkerName("my-long-worker-name")).toBe("my-long-");
+  it("should truncate and add ellipsis when name exceeds maxLength", () => {
+    expect(truncateWorkerName("my-long-worker-name")).toBe("my-long-w…");
   });
 
   it("should respect a custom maxLength", () => {
-    expect(truncateWorkerName("my-worker", 4)).toBe("my-w");
+    expect(truncateWorkerName("my-worker", 4)).toBe("my-…");
   });
 
   it("should handle maxLength of 1", () => {
-    expect(truncateWorkerName("worker", 1)).toBe("w");
+    expect(truncateWorkerName("worker", 1)).toBe("…");
   });
 
   it("should return full name when maxLength is larger than name", () => {

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="20" height="20">
+  <!-- Pages Deployment: page/document with deploy arrow -->
+  <rect x="4" y="2" width="10" height="14" rx="1" fill="none" stroke="white" stroke-width="1.2"/>
+  <polyline points="4,6 8,6 8,2" fill="none" stroke="white" stroke-width="1.2" stroke-linejoin="round"/>
+  <line x1="7" y1="10" x2="12" y2="10" stroke="white" stroke-width="1"/>
+  <line x1="7" y1="13" x2="11" y2="13" stroke="white" stroke-width="1"/>
+  <polyline points="13,14 16,17 19,14" fill="none" stroke="white" stroke-width="1.2" stroke-linejoin="round"/>
+  <line x1="16" y1="10" x2="16" y2="17" stroke="white" stroke-width="1.2"/>
+</svg>

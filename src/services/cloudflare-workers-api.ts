@@ -16,6 +16,7 @@ import type {
   WorkerVersionsApiResponse,
   DeploymentStatus,
 } from "../types/cloudflare-workers";
+import { LINE1_MAX_CHARS, truncateForDisplay } from "./key-image-renderer";
 
 const CLOUDFLARE_API_BASE = "https://api.cloudflare.com/client/v4";
 
@@ -238,18 +239,15 @@ export function formatTimeAgo(isoDate: string, now?: number): string {
 
 /**
  * Truncates a worker name for display on a Stream Deck key.
- * Stream Deck keys have very limited horizontal space.
+ * Delegates to the shared `truncateForDisplay` utility.
  *
  * @param name - Full worker script name
- * @param maxLength - Maximum character length (default: 8)
- * @returns Truncated name
+ * @param maxLength - Maximum character length (default: LINE1_MAX_CHARS)
+ * @returns Truncated name with "…" suffix if truncated
  */
-export function truncateWorkerName(name: string, maxLength: number = 8): string {
+export function truncateWorkerName(name: string, maxLength: number = LINE1_MAX_CHARS): string {
   if (!name) {
     return "";
   }
-  if (name.length <= maxLength) {
-    return name;
-  }
-  return name.substring(0, maxLength);
+  return truncateForDisplay(name, maxLength);
 }

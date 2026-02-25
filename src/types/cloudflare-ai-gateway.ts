@@ -15,6 +15,8 @@
 export type AiGatewayMetricSettings = {
   /** ID of the AI Gateway to monitor */
   gatewayId?: string;
+  /** Display name of the AI Gateway (for key rendering) */
+  gatewayName?: string;
   /** Which metric to display on the key */
   metric?: AiGatewayMetricType;
   /** Time range for GraphQL-based metrics */

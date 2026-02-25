@@ -598,6 +598,17 @@
     this._container.dispatchEvent(event);
   };
 
+  /**
+   * Override the displayed label without changing the selected value.
+   * Useful when restoring a saved setting before items are loaded.
+   */
+  FilterableSelect.prototype.setDisplayLabel = function (label) {
+    if (label) {
+      this.selectedLabel = label;
+      this._updateTriggerDisplay();
+    }
+  };
+
   FilterableSelect.prototype._updateTriggerDisplay = function () {
     if (this.selectedLabel) {
       this._triggerLabel.textContent = this.selectedLabel;

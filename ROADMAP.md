@@ -1,8 +1,8 @@
 # Roadmap — Stream Deck Cloudflare Utilities
 
 > Created: February 20, 2026
-> Current version: 1.1.3
-> Current actions: 4 (Cloudflare Status, Worker Deployment Status, AI Gateway Metric, Worker Analytics)
+> Current version: 1.2.0
+> Current actions: 10 (Cloudflare Status, Worker Deployment Status, AI Gateway Metric, Worker Analytics, Pages Deployment Status, DNS Record Monitor, Zone Analytics, R2 Storage Metric, D1 Database Metric, KV Namespace Metric)
 
 This document outlines potential new actions, enhancements, and improvements based on what the Cloudflare API surface supports with read-only tokens.
 
@@ -115,7 +115,7 @@ query {
 
 ## P1 — New Actions
 
-### 1.1 · Pages Deployment Status
+### ~~1.1 · Pages Deployment Status~~ ✅ Shipped in v1.2.0
 
 **What**: Monitor the latest deployment of a Cloudflare Pages project. Show status (success/failed/building), time ago, branch, and commit message.
 
@@ -140,7 +140,7 @@ GET /accounts/{account_id}/pages/projects/{name}/deployments      → list deplo
 
 ---
 
-### 1.2 · DNS Record Monitor
+### ~~1.2 · DNS Record Monitor~~ ✅ Shipped in v1.2.0
 
 **What**: Monitor a specific DNS record (A, AAAA, CNAME, TXT) and display its value + proxy status. Show warning if the record disappears or changes unexpectedly.
 
@@ -166,7 +166,7 @@ GET /zones/{zone_id}/dns_records?name={record_name}&type={type}
 
 ---
 
-### 1.3 · Zone Analytics Action
+### ~~1.3 · Zone Analytics Action~~ ✅ Shipped in v1.2.0
 
 **What**: Show analytics for a zone — total requests, bandwidth, threats blocked, unique visitors.
 
@@ -205,7 +205,7 @@ query {
 
 ---
 
-### 1.4 · R2 Storage Metric
+### ~~1.4 · R2 Storage Metric~~ ✅ Shipped in v1.2.0
 
 **What**: Show R2 bucket storage metrics — object count, storage used, operations count.
 
@@ -242,13 +242,13 @@ query {
 
 ---
 
-### 1.5 · D1 Database Metric
+### ~~1.5 · D1 Database Metric~~ ✅ Shipped in v1.2.0
 
 **What**: Show D1 database analytics — rows read, rows written, database size.
 
 **Why**: D1 is Cloudflare's serverless SQL database. Monitoring reads/writes helps track usage against free-tier limits.
 
-**API**: GraphQL `d1AnalyticsAdaptiveGroups`:
+**API**: GraphQL `d1AnalyticsAdaptiveGroups` (sum only — no `max` aggregation available):
 ```graphql
 query {
   viewer {
@@ -258,38 +258,42 @@ query {
         limit: 1
       ) {
         sum { readQueries writeQueries rowsRead rowsWritten }
-        max { databaseSizeBytes }
       }
     }
   }
 }
 ```
+
+**Note**: Database size uses the REST endpoint `GET /d1/database/{id}` → `file_size` field (not GraphQL).
 
 **Effort**: Medium — very similar to AI Gateway Metric.
 
 ---
 
-### 1.6 · KV Namespace Metric
+### ~~1.6 · KV Namespace Metric~~ ✅ Shipped in v1.2.0
 
 **What**: Show Workers KV analytics — reads, writes, deletes, list operations.
 
 **Why**: KV is widely used for edge state. Read/write counts help monitor usage patterns.
 
-**API**: GraphQL `workersKvStorageAdaptiveGroups`:
+**API**: GraphQL `kvOperationsAdaptiveGroups`:
 ```graphql
 query {
   viewer {
     accounts(filter: { accountTag: $accountTag }) {
-      workersKvStorageAdaptiveGroups(
+      kvOperationsAdaptiveGroups(
         filter: { namespaceId: $nsId, date_geq: $since }
-        limit: 1
+        limit: 10000
       ) {
-        sum { readQueries writeQueries deleteQueries listQueries }
+        sum { requests }
+        dimensions { actionType }
       }
     }
   }
 }
 ```
+
+**Note**: The REST endpoint `/storage/analytics` does NOT exist. The GraphQL dataset is `kvOperationsAdaptiveGroups` (NOT `workersKvStorageAdaptiveGroups`). Operations are broken down by `actionType` dimension (read/write/delete/list).
 
 **Effort**: Medium.
 
@@ -491,9 +495,8 @@ Based on value and effort:
 | ~~**v1.1.1**~~ | ~~Shared PollingCoordinator refactor, FilterableSelect searchable dropdowns in all PIs, docs reorganized to .github/~~ | ~~Code quality + PI UX polish~~ |
 | ~~**v1.1.2**~~ | ~~Move plugin source assets to plugin/ and build output to release/, project restructuring~~ | ~~Directory restructuring~~ |
 | ~~**v1.1.3**~~ | ~~"Please Setup" display when API credentials are missing~~ | ~~First-run UX~~ |
-| **v1.2** | 3.2 (Token Validation), 3.5 (Long-Press URL), 1.1 (Pages Deployment) | UX polish + Pages |
-| **v1.3** | 1.3 (Zone Analytics), 1.2 (DNS Monitor), 2.4 (SSL Expiry) | Zone-level monitoring |
-| **v1.4** | 1.4 (R2 Metric), 1.5 (D1 Metric), 1.6 (KV Metric) | Storage & database monitoring |
+| ~~**v1.2**~~ | ~~1.1 (Pages Deployment), 1.2 (DNS Monitor), 1.3 (Zone Analytics), 1.4 (R2 Metric), 1.5 (D1 Metric), 1.6 (KV Metric), visual polish, API bug fixes~~ | ~~All P1 new actions + polish~~ |
+| **v1.3** | 3.2 (Token Validation), 3.5 (Long-Press URL), 2.4 (SSL Expiry) | UX polish + zone monitoring |
 | **v2.0** | 3.3 (Permission Detection), 3.4 (Alert Thresholds), 2.1 (WAF Events) | Smart alerting + security |
 
 ---

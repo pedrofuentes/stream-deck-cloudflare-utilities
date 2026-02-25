@@ -18,9 +18,33 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 
 import { CloudflareApiClient } from "../services/cloudflare-api-client";
-import { renderKeyImage, STATUS_COLORS } from "../services/key-image-renderer";
+import { renderKeyImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE3_MAX_CHARS } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
+
+/**
+ * Formats a timestamp as a short relative-time string for line 3.
+ * Output fits within LINE3_MAX_CHARS (13 chars).
+ *
+ * Examples: "just now", "30s ago", "2m ago", "1h ago", "3h ago"
+ */
+export function formatTimeAgo(timestamp: number, now: number = Date.now()): string {
+  const diffMs = now - timestamp;
+  if (diffMs < 0) return "just now";
+
+  const seconds = Math.floor(diffMs / 1000);
+  if (seconds < 10) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 /**
  * Cloudflare Status action - displays the current Cloudflare system status
@@ -41,7 +65,7 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
   private static readonly MARQUEE_INTERVAL_MS = 500;
 
   /** Marquee controller for scrolling long component names. */
-  private marquee = new MarqueeController(10);
+  private marquee = new MarqueeController(LINE1_MAX_CHARS);
 
   /** Interval handle for the marquee animation timer. */
   private marqueeInterval: ReturnType<typeof setInterval> | null = null;
@@ -52,8 +76,11 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
     | DidReceiveSettingsEvent<CloudflareStatusSettings>
     | null = null;
 
+  /** Timestamp of the last status check (for "last checked" display). */
+  private lastCheckTime: number | null = null;
+
   /** Last rendered image parameters for marquee re-rendering. */
-  private lastRenderParams: { line2: string; statusColor: string } | null = null;
+  private lastRenderParams: { line2: string; line3: string; statusColor: string } | null = null;
 
   /** Unsubscribe function for the polling coordinator. */
   private unsubscribeCoordinator: (() => void) | null = null;
@@ -90,6 +117,7 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
     this.marquee.setText("");
     this.lastEvent = null;
     this.lastRenderParams = null;
+    this.lastCheckTime = null;
   }
 
   /**
@@ -140,11 +168,14 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
         const components = await this.apiClient.getComponents();
         const component = components.find((c) => c.id === componentId);
         if (!component) {
-          this.lastRenderParams = { line2: "N/A", statusColor: STATUS_COLORS.gray };
+          this.lastCheckTime = Date.now();
+          const timeAgo = formatTimeAgo(this.lastCheckTime);
+          this.lastRenderParams = { line2: "N/A", line3: timeAgo, statusColor: STATUS_COLORS.gray };
           await ev.action.setImage(
             renderKeyImage({
               line1: this.marquee.needsAnimation() ? this.marquee.getCurrentText() : rawLabel,
               line2: "N/A",
+              line3: timeAgo,
               statusColor: STATUS_COLORS.gray,
             })
           );
@@ -154,11 +185,14 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
         const label = settings.componentName ?? component.name;
         this.marquee.setText(label);
         const { label: statusLabel, color } = CloudflareStatus.mapComponentStatus(component.status);
-        this.lastRenderParams = { line2: statusLabel, statusColor: color };
+        this.lastCheckTime = Date.now();
+        const timeAgo = formatTimeAgo(this.lastCheckTime);
+        this.lastRenderParams = { line2: statusLabel, line3: timeAgo, statusColor: color };
         await ev.action.setImage(
           renderKeyImage({
             line1: this.marquee.needsAnimation() ? this.marquee.getCurrentText() : label,
             line2: statusLabel,
+            line3: timeAgo,
             statusColor: color,
           })
         );
@@ -166,6 +200,7 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
       } else {
         // Overall status mode (original behavior)
         const status = await this.apiClient.getSystemStatus();
+        this.lastCheckTime = Date.now();
         const image = this.renderStatusImage(status.indicator);
         this.lastRenderParams = null; // renderStatusImage uses "Cloudflare" which is ≤10 chars
         this.stopMarqueeTimer();
@@ -188,7 +223,7 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
         `Backoff: skipping polls for ${Math.round(backoffMs / 1000)}s after ${this.consecutiveErrors} consecutive error(s)`
       );
 
-      this.lastRenderParams = { line2: "ERR", statusColor: STATUS_COLORS.red };
+      this.lastRenderParams = { line2: "ERR", line3: "", statusColor: STATUS_COLORS.red };
       await ev.action.setImage(
         renderKeyImage({
           line1: this.marquee.needsAnimation() ? this.marquee.getCurrentText() : rawLabel,
@@ -204,35 +239,41 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
    * Renders an SVG data URI for the given overall status indicator.
    */
   public renderStatusImage(indicator: string): string {
+    const timeAgo = this.lastCheckTime ? formatTimeAgo(this.lastCheckTime) : undefined;
     switch (indicator) {
       case "none":
         return renderKeyImage({
           line1: "Cloudflare",
           line2: "OK",
+          line3: timeAgo,
           statusColor: STATUS_COLORS.green,
         });
       case "minor":
         return renderKeyImage({
           line1: "Cloudflare",
           line2: "Minor",
+          line3: timeAgo,
           statusColor: STATUS_COLORS.amber,
         });
       case "major":
         return renderKeyImage({
           line1: "Cloudflare",
           line2: "Major",
+          line3: timeAgo,
           statusColor: STATUS_COLORS.red,
         });
       case "critical":
         return renderKeyImage({
           line1: "Cloudflare",
           line2: "Critical",
+          line3: timeAgo,
           statusColor: STATUS_COLORS.red,
         });
       default:
         return renderKeyImage({
           line1: "Cloudflare",
           line2: "N/A",
+          line3: timeAgo,
           statusColor: STATUS_COLORS.gray,
         });
     }
@@ -322,10 +363,14 @@ export class CloudflareStatus extends SingletonAction<CloudflareStatusSettings> 
     const changed = this.marquee.tick();
     if (!changed || !this.lastEvent || !this.lastRenderParams) return;
 
+    // Re-compute timeAgo on each marquee tick so it stays fresh
+    const timeAgo = this.lastCheckTime ? formatTimeAgo(this.lastCheckTime) : undefined;
+
     await this.lastEvent.action.setImage(
       renderKeyImage({
         line1: this.marquee.getCurrentText(),
         line2: this.lastRenderParams.line2,
+        line3: timeAgo ?? this.lastRenderParams.line3,
         statusColor: this.lastRenderParams.statusColor,
       })
     );

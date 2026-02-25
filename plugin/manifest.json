@@ -56,6 +56,90 @@
       "Tooltip": "Display analytics metrics from a Cloudflare Worker",
       "UserTitleEnabled": false,
       "UUID": "com.pedrofuentes.cloudflare-utilities.worker-analytics"
+    },
+    {
+      "Icon": "imgs/actions/pages-deployment-status",
+      "Name": "Pages Deployment",
+      "PropertyInspectorPath": "ui/pages-deployment-status.html",
+      "States": [
+        {
+          "Image": "imgs/actions/pages-deployment-status",
+          "ShowTitle": false
+        }
+      ],
+      "Tooltip": "Display deployment status of a Cloudflare Pages project",
+      "UserTitleEnabled": false,
+      "UUID": "com.pedrofuentes.cloudflare-utilities.pages-deployment-status"
+    },
+    {
+      "Icon": "imgs/actions/dns-record-monitor",
+      "Name": "DNS Record Monitor",
+      "PropertyInspectorPath": "ui/dns-record-monitor.html",
+      "States": [
+        {
+          "Image": "imgs/actions/dns-record-monitor",
+          "ShowTitle": false
+        }
+      ],
+      "Tooltip": "Monitor a specific DNS record in a Cloudflare zone",
+      "UserTitleEnabled": false,
+      "UUID": "com.pedrofuentes.cloudflare-utilities.dns-record-monitor"
+    },
+    {
+      "Icon": "imgs/actions/zone-analytics",
+      "Name": "Zone Analytics",
+      "PropertyInspectorPath": "ui/zone-analytics.html",
+      "States": [
+        {
+          "Image": "imgs/actions/zone-analytics",
+          "ShowTitle": false
+        }
+      ],
+      "Tooltip": "Display analytics metrics for a Cloudflare zone",
+      "UserTitleEnabled": false,
+      "UUID": "com.pedrofuentes.cloudflare-utilities.zone-analytics"
+    },
+    {
+      "Icon": "imgs/actions/r2-storage-metric",
+      "Name": "R2 Storage Metric",
+      "PropertyInspectorPath": "ui/r2-storage-metric.html",
+      "States": [
+        {
+          "Image": "imgs/actions/r2-storage-metric",
+          "ShowTitle": false
+        }
+      ],
+      "Tooltip": "Display storage metrics for a Cloudflare R2 bucket",
+      "UserTitleEnabled": false,
+      "UUID": "com.pedrofuentes.cloudflare-utilities.r2-storage-metric"
+    },
+    {
+      "Icon": "imgs/actions/d1-database-metric",
+      "Name": "D1 Database Metric",
+      "PropertyInspectorPath": "ui/d1-database-metric.html",
+      "States": [
+        {
+          "Image": "imgs/actions/d1-database-metric",
+          "ShowTitle": false
+        }
+      ],
+      "Tooltip": "Display analytics metrics for a Cloudflare D1 database",
+      "UserTitleEnabled": false,
+      "UUID": "com.pedrofuentes.cloudflare-utilities.d1-database-metric"
+    },
+    {
+      "Icon": "imgs/actions/kv-namespace-metric",
+      "Name": "KV Namespace Metric",
+      "PropertyInspectorPath": "ui/kv-namespace-metric.html",
+      "States": [
+        {
+          "Image": "imgs/actions/kv-namespace-metric",
+          "ShowTitle": false
+        }
+      ],
+      "Tooltip": "Display analytics metrics for a Cloudflare Workers KV namespace",
+      "UserTitleEnabled": false,
+      "UUID": "com.pedrofuentes.cloudflare-utilities.kv-namespace-metric"
     }
   ],
   "Author": "Pedro Fuentes",
@@ -85,5 +169,5 @@
   },
   "URL": "https://github.com/pedrofuentes/stream-deck-cloudflare-utilities",
   "UUID": "com.pedrofuentes.cloudflare-utilities",
-  "Version": "1.1.3.0"
+  "Version": "1.2.0.0"
 }

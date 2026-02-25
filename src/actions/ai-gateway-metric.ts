@@ -24,7 +24,7 @@ import {
   RateLimitError,
 } from "../services/cloudflare-ai-gateway-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
-import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS } from "../services/key-image-renderer";
+import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE2_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
 import type {
@@ -39,8 +39,7 @@ import { METRIC_CYCLE_ORDER, METRIC_LABELS, METRIC_SHORT_LABELS } from "../types
  * Max 10 characters, appends "…" if truncated.
  */
 export function truncateGatewayName(name: string): string {
-  if (name.length <= 10) return name;
-  return name.slice(0, 9) + "…";
+  return truncateForDisplay(name, LINE1_MAX_CHARS);
 }
 
 /**
@@ -121,6 +120,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   /** Cached metrics for display on key press cycling (avoids re-fetch). */
   private lastMetrics: AiGatewayMetrics | null = null;
   private lastGatewayId: string | null = null;
+  private lastGatewayName: string | null = null;
 
   /**
    * The metric currently shown on the key. This is the authoritative
@@ -152,7 +152,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   private static readonly MARQUEE_INTERVAL_MS = 500;
 
   /** Marquee controller for scrolling long gateway names. */
-  private marquee = new MarqueeController(10);
+  private marquee = new MarqueeController(LINE1_MAX_CHARS);
 
   /** Interval handle for the marquee animation timer. */
   private marqueeInterval: ReturnType<typeof setInterval> | null = null;
@@ -187,12 +187,13 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     this.apiClient = new CloudflareAiGatewayApi(global.apiToken!, global.accountId!);
     this.lastDataSettings = { gatewayId: settings.gatewayId, timeRange: settings.timeRange };
     this.displayMetric = settings.metric ?? "requests";
-    this.marquee.setText(settings.gatewayId ?? "");
+    const displayLabel = settings.gatewayName ?? settings.gatewayId ?? "";
+    this.marquee.setText(displayLabel);
 
     // Show a loading state immediately while the API call is in flight
     await ev.action.setImage(
       renderKeyImage({
-        line1: truncateGatewayName(settings.gatewayId ?? ""),
+        line1: truncateGatewayName(displayLabel),
         line2: "...",
         line3: METRIC_SHORT_LABELS[this.displayMetric] ?? "",
         statusColor: metricColor(this.displayMetric),
@@ -220,6 +221,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       this.apiClient = null;
       this.lastMetrics = null;
       this.lastGatewayId = null;
+      this.lastGatewayName = null;
       this.lastDataSettings = {};
       await ev.action.setImage(renderSetupImage());
       return;
@@ -229,6 +231,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       this.apiClient = null;
       this.lastMetrics = null;
       this.lastGatewayId = null;
+      this.lastGatewayName = null;
       this.lastDataSettings = {};
       await ev.action.setImage(renderPlaceholderImage());
       return;
@@ -251,7 +254,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     // If only the display metric changed and we have cached data, re-render without refetching
     if (!dataChanged && this.lastMetrics && this.apiClient) {
       await ev.action.setImage(
-        this.renderMetric(this.displayMetric, this.lastGatewayId ?? "", this.lastMetrics, settings.timeRange, this.marquee.getCurrentText())
+        this.renderMetric(this.displayMetric, this.lastGatewayName ?? this.lastGatewayId ?? "", this.lastMetrics, settings.timeRange, this.marquee.getCurrentText())
       );
       this.startMarqueeIfNeeded();
       return;
@@ -262,13 +265,15 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     this.apiClient = new CloudflareAiGatewayApi(global.apiToken!, global.accountId!);
     this.lastMetrics = null;
     this.lastGatewayId = null;
+    this.lastGatewayName = null;
     this.lastDataSettings = { gatewayId: settings.gatewayId, timeRange: settings.timeRange };
-    this.marquee.setText(settings.gatewayId ?? "");
+    const displayLabel2 = settings.gatewayName ?? settings.gatewayId ?? "";
+    this.marquee.setText(displayLabel2);
 
     // Show loading state while fetching
     await ev.action.setImage(
       renderKeyImage({
-        line1: truncateGatewayName(settings.gatewayId ?? ""),
+        line1: truncateGatewayName(displayLabel2),
         line2: "...",
         line3: METRIC_SHORT_LABELS[this.displayMetric] ?? "",
         statusColor: metricColor(this.displayMetric),
@@ -290,6 +295,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     this.apiClient = null;
     this.lastMetrics = null;
     this.lastGatewayId = null;
+    this.lastGatewayName = null;
     this.lastDataSettings = {};
     this.pendingKeyCycle = false;
     this.displayMetric = "requests";
@@ -328,7 +334,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     // Re-render immediately with cached data if available
     if (this.lastMetrics) {
       await ev.action.setImage(
-        this.renderMetric(this.displayMetric, this.lastGatewayId ?? "", this.lastMetrics, settings.timeRange, this.marquee.getCurrentText())
+        this.renderMetric(this.displayMetric, this.lastGatewayName ?? this.lastGatewayId ?? "", this.lastMetrics, settings.timeRange, this.marquee.getCurrentText())
       );
       this.startMarqueeIfNeeded();
     }
@@ -369,13 +375,15 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
 
       this.lastMetrics = metrics;
       this.lastGatewayId = settings.gatewayId;
+      this.lastGatewayName = settings.gatewayName ?? settings.gatewayId;
       this.isErrorState = false;
       this.skipUntil = 0;
 
       // Always render using the authoritative displayMetric, not the
       // (potentially stale) event payload metric.
+      const displayLabel = settings.gatewayName ?? settings.gatewayId;
       await ev.action.setImage(
-        this.renderMetric(this.displayMetric, settings.gatewayId, metrics, timeRange, this.marquee.getCurrentText())
+        this.renderMetric(this.displayMetric, displayLabel, metrics, timeRange, this.marquee.getCurrentText())
       );
       this.startMarqueeIfNeeded();
     } catch (error) {
@@ -408,7 +416,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       );
       await ev.action.setImage(
         renderKeyImage({
-          line1: truncateGatewayName(settings.gatewayId),
+          line1: truncateGatewayName(settings.gatewayName ?? settings.gatewayId),
           line2: "ERR",
           statusColor: STATUS_COLORS.red,
         })
@@ -441,8 +449,8 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
 
     return renderKeyImage({
       line1: name,
-      line2: value,
-      line3: label,
+      line2: truncateForDisplay(value, LINE2_MAX_CHARS),
+      line3: truncateForDisplay(label, LINE3_MAX_CHARS),
       statusColor: color,
     });
   }
@@ -521,7 +529,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     const timeRange = this.lastEvent.payload.settings.timeRange ?? "24h";
 
     await this.lastEvent.action.setImage(
-      this.renderMetric(this.displayMetric, this.lastGatewayId ?? "", this.lastMetrics, timeRange, displayName)
+      this.renderMetric(this.displayMetric, this.lastGatewayName ?? this.lastGatewayId ?? "", this.lastMetrics, timeRange, displayName)
     );
   }
 
@@ -540,6 +548,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       this.apiClient = null;
       this.lastMetrics = null;
       this.lastGatewayId = null;
+      this.lastGatewayName = null;
       this.lastDataSettings = {};
 
       const ev = this.lastEvent;
@@ -548,7 +557,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
 
       // Preserve the saved display metric from settings
       this.displayMetric = settings.metric ?? this.displayMetric;
-      this.marquee.setText(settings.gatewayId ?? "");
+      this.marquee.setText(settings.gatewayName ?? settings.gatewayId ?? "");
 
       if (!this.hasCredentials(global)) {
         await ev.action.setImage(renderSetupImage());

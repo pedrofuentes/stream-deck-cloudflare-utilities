@@ -9,8 +9,14 @@ import streamDeck from "@elgato/streamdeck";
 
 import { AiGatewayMetric } from "./actions/ai-gateway-metric";
 import { CloudflareStatus } from "./actions/cloudflare-status";
+import { D1DatabaseMetric } from "./actions/d1-database-metric";
+import { DnsRecordMonitor } from "./actions/dns-record-monitor";
+import { KvNamespaceMetric } from "./actions/kv-namespace-metric";
+import { PagesDeploymentStatus } from "./actions/pages-deployment-status";
+import { R2StorageMetric } from "./actions/r2-storage-metric";
 import { WorkerAnalytics } from "./actions/worker-analytics";
 import { WorkerDeploymentStatus } from "./actions/worker-deployment-status";
+import { ZoneAnalytics } from "./actions/zone-analytics";
 import { updateGlobalSettings, type GlobalSettings } from "./services/global-settings-store";
 import { getPollingCoordinator, DEFAULT_REFRESH_INTERVAL_SECONDS } from "./services/polling-coordinator";
 
@@ -20,8 +26,14 @@ streamDeck.logger.setLevel("debug");
 // Register actions
 streamDeck.actions.registerAction(new AiGatewayMetric());
 streamDeck.actions.registerAction(new CloudflareStatus());
+streamDeck.actions.registerAction(new D1DatabaseMetric());
+streamDeck.actions.registerAction(new DnsRecordMonitor());
+streamDeck.actions.registerAction(new KvNamespaceMetric());
+streamDeck.actions.registerAction(new PagesDeploymentStatus());
+streamDeck.actions.registerAction(new R2StorageMetric());
 streamDeck.actions.registerAction(new WorkerAnalytics());
 streamDeck.actions.registerAction(new WorkerDeploymentStatus());
+streamDeck.actions.registerAction(new ZoneAnalytics());
 
 // ── Global Settings ────────────────────────────────────────────────────────
 // API token and account ID are shared across all actions.

@@ -31,6 +31,26 @@ export const BG_COLOR = "#0d1117";
 export const TEXT_PRIMARY = "#ffffff";
 export const TEXT_SECONDARY = "#9ca3af";
 
+// ── Line Character Limits ──────────────────────────────────────────────────
+// Maximum visible characters per line based on font size and 144 px canvas.
+// Used by MarqueeController maxVisible and static truncation.
+
+/** Line 1: 18 px font — identifier / name */
+export const LINE1_MAX_CHARS = 10;
+/** Line 2: 30 px bold font — main value / status */
+export const LINE2_MAX_CHARS = 7;
+/** Line 3: 15 px font — metadata / detail */
+export const LINE3_MAX_CHARS = 13;
+
+/**
+ * Truncates text for display on a Stream Deck key.
+ * If the text exceeds `maxChars`, it is sliced and an ellipsis is appended.
+ */
+export function truncateForDisplay(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars - 1) + "…";
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export type KeyImageOptions = {

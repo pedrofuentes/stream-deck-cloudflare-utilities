@@ -339,6 +339,43 @@ main ─────────────────────────
 
 ---
 
+## Cloudflare API Pitfalls — MUST READ Before Adding/Modifying API Calls
+
+These are hard-won rules from production failures. **Every new API integration must follow them.**
+
+### 1. GraphQL Dataset Names Are NOT Guessable
+Cloudflare's GraphQL Analytics API uses specific dataset names that are **not documented consistently** and cannot be guessed from product names. Known valid datasets:
+- `httpRequests1dGroups` — Zone HTTP analytics (NOT `httpRequestsAdaptiveGroups` for bytes/threats)
+- `d1AnalyticsAdaptiveGroups` — D1 database query analytics (sum only, NO `max` aggregation)
+- `r2StorageAdaptiveGroups` — R2 storage metrics (has `max` aggregation)
+- `r2OperationsAdaptiveGroups` — R2 operation counts
+- `kvOperationsAdaptiveGroups` — KV operation counts by actionType (read/write/delete/list), uses `sum { requests }` and `dimensions { actionType }`
+- Workers analytics uses the REST API, not GraphQL
+
+**KV dataset names are NOT what you'd guess** — `workersKvStorageAdaptiveGroups` does NOT exist. The correct dataset is `kvOperationsAdaptiveGroups`. The REST endpoint `/accounts/{id}/storage/analytics` also does NOT exist.
+
+### 2. GraphQL Fields Are NOT Guessable Either
+Even if a dataset exists, its available fields and aggregations vary:
+- Some datasets have `sum` but not `max` (e.g., D1's `d1AnalyticsAdaptiveGroups`)
+- Some have `max` but not `sum` (e.g., R2 storage)
+- Field names differ between datasets (e.g., `requests` vs `readQueries`)
+- **Always test the actual GraphQL query against the live API before committing.** If you can't test live, use only fields confirmed working in existing code.
+
+### 3. Prefer REST APIs When GraphQL Is Uncertain
+If a GraphQL dataset's existence or field names are not confirmed:
+- Use the REST API instead (e.g., D1 uses `/d1/database/{id}` for database size)
+- For metadata like database size, use the resource's detail endpoint (e.g., D1 uses `/d1/database/{id}` → `file_size`)
+- REST endpoints are better documented and more stable
+
+### 4. Display Names vs IDs
+Every action's Property Inspector (PI) saves **both** the resource ID and a human-readable name (e.g., `databaseId` + `databaseName`, `zoneId` + `zoneName`). The action code must:
+- Add the name field to the settings type (e.g., `databaseName?: string`)
+- Use `settings.displayName ?? settings.resourceId` everywhere for display (marquee, line1, error state)
+- Track `lastDisplayName` alongside `lastResourceId` for cached renders
+- The PI already saves the name via `actionSettings.xxxName = label` in the FilterableSelect `onChange` handler
+
+---
+
 ## Global Settings Architecture
 
 API credentials (API Token, Account ID) are shared across all actions via Stream Deck's global settings system.

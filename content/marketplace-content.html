@@ -42,12 +42,12 @@
 
 <p><b>Cloudflare Utilities</b> puts your Cloudflare infrastructure at your fingertips — right on your Stream Deck.</p>
 
-<p>Monitor Workers, AI Gateways, and system status without ever leaving your editor, terminal, or game. One glance at your deck tells you everything: deployment status, request counts, error rates, costs, and more — all updating in real time.</p>
+<p>Monitor Workers, AI Gateways, Pages, DNS, and system status without ever leaving your editor, terminal, or game. One glance at your deck tells you everything: deployment status, request counts, error rates, costs, storage, and more — all updating in real time.</p>
 
-<h2>🔥 4 Powerful Actions</h2>
+<h2>🔥 10 Powerful Actions</h2>
 
 <h3>Cloudflare Status</h3>
-<p>Keep an eye on Cloudflare's global health. See the overall system status — or drill down into a specific component like CDN, DNS, Workers, or Pages. The key updates automatically and lights up instantly if there's an incident. Press for an instant refresh.</p>
+<p>Keep an eye on Cloudflare's global health. See the overall system status — or drill down into a specific component like CDN, DNS, Workers, or Pages. Shows "last checked" timestamp so you always know how fresh the data is. Press for an instant refresh.</p>
 
 <h3>Worker Deployment Status</h3>
 <p>Know the state of your Cloudflare Worker at a glance:</p>
@@ -60,35 +60,38 @@
 <p>Color-coded accent bars make status unmistakable even from across the room.</p>
 
 <h3>AI Gateway Metric</h3>
-<p>Real-time metrics from your Cloudflare AI Gateway, displayed on a single key. Press to cycle through:</p>
-<ul>
-  <li><b>Requests</b> — Total request count</li>
-  <li><b>Tokens</b> — Token usage</li>
-  <li><b>Cost</b> — Estimated spend</li>
-  <li><b>Errors</b> — Error count &amp; error rate</li>
-  <li><b>Cache Hits</b> — See how much you're saving</li>
-  <li><b>Logs Stored</b> — Stored log count</li>
-</ul>
-<p>Features adaptive polling that backs off intelligently on rate limits (429).</p>
+<p>Real-time metrics from your Cloudflare AI Gateway. Press to cycle through: Requests, Tokens, Cost, Errors, Error Rate, Cache Hit Rate, and Logs Stored. Features adaptive polling that backs off intelligently on rate limits.</p>
 
 <h3>Worker Analytics</h3>
-<p>Deep analytics for any Cloudflare Worker:</p>
-<ul>
-  <li><b>Requests</b> — Total invocations</li>
-  <li><b>Success Rate</b> — Percentage of successful requests</li>
-  <li><b>Errors</b> — Error count</li>
-  <li><b>CPU Time</b> — Average CPU time per request</li>
-</ul>
-<p>Choose your time window (24h, 7d, or 30d) and press the key to cycle through metrics.</p>
+<p>Deep analytics for any Cloudflare Worker: Requests, Success Rate, Errors, CPU Time (P50/P99), Wall Time, and Subrequests. Choose your time window (24h, 7d, or 30d) and press the key to cycle.</p>
+
+<h3>Pages Deployment Status</h3>
+<p>Monitor your Cloudflare Pages projects. See deployment status (success/failed/building), time since last deploy, branch name, and commit hash — all color-coded for instant recognition.</p>
+
+<h3>DNS Record Monitor</h3>
+<p>Watch a specific DNS record (A, AAAA, CNAME, MX, TXT). See the current value, record type, and proxy status. Green for proxied, blue for DNS-only, red if the record is missing.</p>
+
+<h3>Zone Analytics</h3>
+<p>Traffic analytics for any zone: total requests, bandwidth, cache hit rate, threats blocked, and unique visitors. Pick your time window and cycle through metrics.</p>
+
+<h3>R2 Storage Metric</h3>
+<p>Monitor R2 bucket storage: object count, payload size, metadata size, and Class A/B operations. Stay on top of your storage usage and costs.</p>
+
+<h3>D1 Database Metric</h3>
+<p>Track D1 database analytics: rows read, rows written, read queries, write queries, and database size. Keep an eye on your serverless database usage.</p>
+
+<h3>KV Namespace Metric</h3>
+<p>Workers KV operation counts: reads, writes, deletes, and list operations. Monitor your edge state usage patterns at a glance.</p>
 
 <h2>✨ Built for Your Workflow</h2>
 <ul>
   <li><b>Shared credentials</b> — Set up your Cloudflare API Token and Account ID once, and every action uses them automatically.</li>
-  <li><b>Smart dropdowns</b> — Workers and Gateways are auto-populated from your account. No copy-pasting IDs.</li>
+  <li><b>Smart dropdowns</b> — Resources are auto-populated from your account. No copy-pasting IDs.</li>
   <li><b>Marquee scrolling</b> — Long resource names scroll smoothly so nothing gets cut off.</li>
   <li><b>Adaptive polling</b> — Refresh intervals you control (default 60s, min 10s), with automatic backoff when APIs are busy.</li>
   <li><b>OLED-optimized</b> — High-contrast dark theme with color-coded accent bars designed specifically for Stream Deck displays.</li>
   <li><b>Press to refresh</b> — Any key can be pressed for an instant update.</li>
+  <li><b>Human-readable names</b> — All actions display resource names, not IDs.</li>
 </ul>
 
 <h2>🔒 Privacy First</h2>
@@ -106,7 +109,7 @@
   <li>Install the plugin from the Stream Deck Store</li>
   <li>Drag any Cloudflare action onto a key</li>
   <li>Click "Setup" in the Property Inspector to enter your API credentials</li>
-  <li>Select your Worker, Gateway, or component — and you're live!</li>
+  <li>Select your resource — and you're live!</li>
 </ol>
 
 <p>Open source and community-driven. Contributions welcome on GitHub.</p>
@@ -122,15 +125,44 @@
   <h2 class="section-label">Release Notes (max 1,500 characters each) — copy the version you need</h2>
 
   <div class="tab-bar">
-    <div class="tab active" onclick="showTab('v113')">v1.1.3</div>
+    <div class="tab active" onclick="showTab('v120')">v1.2.0</div>
+    <div class="tab" onclick="showTab('v113')">v1.1.3</div>
     <div class="tab" onclick="showTab('v112')">v1.1.2</div>
     <div class="tab" onclick="showTab('v111')">v1.1.1</div>
     <div class="tab" onclick="showTab('v110')">v1.1.0</div>
     <div class="tab" onclick="showTab('v100')">v1.0.0</div>
   </div>
 
+  <!-- v1.2.0 -->
+  <div class="tab-content active" id="tab-v120">
+    <div class="content">
+
+<p><b>Massive expansion — 6 new actions + visual polish!</b></p>
+
+<p><b>New actions:</b></p>
+<ul>
+  <li><b>Pages Deployment Status</b> — Monitor Cloudflare Pages projects: deployment status, branch, commit hash, and time since deploy.</li>
+  <li><b>DNS Record Monitor</b> — Watch any DNS record (A, AAAA, CNAME, MX, TXT). See value, type, and proxy status with color-coded indicators.</li>
+  <li><b>Zone Analytics</b> — Traffic stats for any zone: requests, bandwidth, cache rate, threats, and unique visitors. Cycle metrics with a key press.</li>
+  <li><b>R2 Storage Metric</b> — Track R2 bucket storage: object count, payload size, and operation counts.</li>
+  <li><b>D1 Database Metric</b> — Monitor D1 databases: rows read/written, queries, and database size.</li>
+  <li><b>KV Namespace Metric</b> — Workers KV operation counts: reads, writes, deletes, and list operations.</li>
+</ul>
+
+<p><b>Visual polish:</b></p>
+<ul>
+  <li>Cloudflare Status now shows "last checked" timestamp (e.g., "just now", "2m ago").</li>
+  <li>AI Gateway displays human-readable gateway names instead of IDs.</li>
+  <li>D1 Database Size label no longer shows a time range (it's a point-in-time value).</li>
+  <li>All truncation functions now use shared constants for consistency.</li>
+</ul>
+
+    </div>
+    <div class="char-count" id="count-v120"></div>
+  </div>
+
   <!-- v1.1.3 -->
-  <div class="tab-content active" id="tab-v113">
+  <div class="tab-content" id="tab-v113">
     <div class="content">
 
 <p><b>Improved setup experience &amp; SDK update</b></p>
@@ -243,7 +275,7 @@
   countChars('description', 'desc-count');
 
   // Count each release note
-  ['v113','v112','v111','v110','v100'].forEach(v => {
+  ['v120','v113','v112','v111','v110','v100'].forEach(v => {
     const tab = document.getElementById('tab-' + v);
     if (!tab) return;
     const content = tab.querySelector('.content');

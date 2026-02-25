@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>AI Gateway Metric</title>
+    <title>D1 Database Metric</title>
     <style>
       :root {
         --bg: #2d2d2d;
@@ -16,11 +16,7 @@
         --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       }
 
-      * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
 
       body {
         background: var(--bg);
@@ -53,7 +49,6 @@
         min-width: 0;
       }
 
-      input[type="number"],
       select {
         width: 100%;
         background: var(--bg-input);
@@ -64,17 +59,11 @@
         font-family: var(--font);
         font-size: 12px;
         outline: none;
-      }
-
-      input:focus,
-      select:focus {
-        border-color: var(--accent);
-      }
-
-      select {
         cursor: pointer;
         appearance: auto;
       }
+
+      select:focus { border-color: var(--accent); }
 
       .status-msg {
         font-size: 10px;
@@ -126,12 +115,14 @@
         font-style: italic;
       }
 
-      .account-info.configured {
-        color: var(--success);
-      }
+      .account-info.configured { color: var(--success); }
+      .account-info.not-configured { color: var(--error); }
 
-      .account-info.not-configured {
-        color: var(--error);
+      .tips {
+        font-size: 10px;
+        color: var(--text-muted);
+        padding: 8px 16px;
+        line-height: 1.5;
       }
     </style>
   </head>
@@ -142,27 +133,28 @@
     <div class="account-info" id="accountInfo">Checking account settings…</div>
 
     <hr class="separator" />
-    <div class="section-heading">Gateway Settings</div>
+    <div class="section-heading">D1 Settings</div>
 
     <div class="sdpi-item">
-      <div class="sdpi-item-label">Gateway</div>
+      <div class="sdpi-item-label">Database</div>
       <div class="sdpi-item-value">
-        <div id="gatewayIdContainer"></div>
+        <div id="databaseContainer"></div>
       </div>
     </div>
-    <div class="status-msg" id="gatewayStatus"></div>
+    <div class="status-msg" id="databaseStatus"></div>
+
+    <hr class="separator" />
+    <div class="section-heading">Display</div>
 
     <div class="sdpi-item">
       <div class="sdpi-item-label">Metric</div>
       <div class="sdpi-item-value">
         <select id="metric">
-          <option value="requests">Requests</option>
-          <option value="tokens">Tokens</option>
-          <option value="cost">Cost</option>
-          <option value="errors">Errors</option>
-          <option value="error_rate">Error Rate</option>
-          <option value="cache_hit_rate">Cache Hit Rate</option>
-          <option value="logs_stored">Logs Stored</option>
+          <option value="reads">Reads</option>
+          <option value="writes">Writes</option>
+          <option value="rows_read">Rows Read</option>
+          <option value="rows_written">Rows Written</option>
+          <option value="db_size">Database Size</option>
         </select>
       </div>
     </div>
@@ -178,115 +170,71 @@
       </div>
     </div>
 
-    <hr class="separator" />
-
-    <details>
-      <summary>Tips</summary>
-      <div class="help-content" style="color: #808080; font-size: 11px; margin: 4px 0 8px;">
-        <p>Press the key to cycle through metrics: Requests → Tokens → Cost → Errors → Error Rate → Cache Hit Rate → Logs</p>
-      </div>
-    </details>
+    <div class="tips">
+      <strong>Tip:</strong> Press the key to cycle metrics: Reads → Writes →
+      Rows Read → Rows Written → DB Size.
+    </div>
 
     <script src="filterable-select.js"></script>
     <script>
-      /* ───────── Stream Deck WebSocket ───────── */
-      let websocket = null;
-      let piUUID = "";
-      let globalSettings = {};
-      let actionSettings = {};
+      var websocket = null;
+      var piUUID = "";
+      var globalSettings = {};
+      var actionSettings = {};
+      var CF_API = "https://api.cloudflare.com/client/v4";
 
-      const CF_API = "https://api.cloudflare.com/client/v4";
-
-      /* ───────── FilterableSelect instance ───────── */
-      var gatewayFS = new FilterableSelect({
-        container: document.getElementById("gatewayIdContainer"),
-        setting: "gatewayId",
-        placeholder: "-- Select Gateway --",
-        searchPlaceholder: "Search gateways…",
+      var databaseFS = new FilterableSelect({
+        container: document.getElementById("databaseContainer"),
+        setting: "databaseId",
+        placeholder: "-- Select Database --",
+        searchPlaceholder: "Search databases…",
         threshold: 8,
-        onRefresh: function () {
-          loadGateways();
-        },
+        onRefresh: function () { loadDatabases(); },
         onChange: function (value, label) {
-          actionSettings.gatewayId = value;
-          actionSettings.gatewayName = label;
+          actionSettings.databaseId = value;
+          actionSettings.databaseName = label;
           saveActionSettings();
         },
       });
 
-      function connectElgatoStreamDeckSocket(
-        port,
-        uuid,
-        registerEvent,
-        info,
-        actionInfo
-      ) {
+      function connectElgatoStreamDeckSocket(port, uuid, registerEvent, info, actionInfo) {
         piUUID = uuid;
-
-        // Expose for setup popup
         window.piUUID = uuid;
-
         try {
-          const action = JSON.parse(actionInfo);
+          var action = JSON.parse(actionInfo);
           actionSettings = action?.payload?.settings || {};
-        } catch {
-          actionSettings = {};
-        }
+        } catch { actionSettings = {}; }
 
         websocket = new WebSocket("ws://127.0.0.1:" + port);
-
-        // Expose for setup popup
         window.websocket = websocket;
 
         websocket.onopen = function () {
-          websocket.send(
-            JSON.stringify({ event: registerEvent, uuid: uuid })
-          );
-          // Request global settings
-          websocket.send(
-            JSON.stringify({ event: "getGlobalSettings", context: uuid })
-          );
+          websocket.send(JSON.stringify({ event: registerEvent, uuid: uuid }));
+          websocket.send(JSON.stringify({ event: "getGlobalSettings", context: uuid }));
           populateActionFields();
         };
 
         websocket.onmessage = function (evt) {
           try {
-            const data = JSON.parse(evt.data);
+            var data = JSON.parse(evt.data);
             if (data.event === "didReceiveGlobalSettings") {
               globalSettings = data?.payload?.settings || {};
               updateAccountInfo();
-              // Auto-load gateways if credentials are set
-              if (globalSettings.apiToken && globalSettings.accountId && !gatewayFS.value) {
-                loadGateways();
-              }
+              if (globalSettings.apiToken && globalSettings.accountId && !databaseFS.value) loadDatabases();
             }
             if (data.event === "didReceiveSettings") {
               actionSettings = data?.payload?.settings || {};
               populateActionFields();
             }
-          } catch {
-            // ignore
-          }
+          } catch { }
         };
       }
 
-      /* ───────── Setup Popup ───────── */
-
       var setupPopup = null;
-
       document.getElementById("openSetupBtn").addEventListener("click", function () {
-        if (setupPopup && !setupPopup.closed) {
-          setupPopup.focus();
-          return;
-        }
-        setupPopup = window.open(
-          "setup.html",
-          "Cloudflare Account Settings",
-          "width=500,height=350"
-        );
+        if (setupPopup && !setupPopup.closed) { setupPopup.focus(); return; }
+        setupPopup = window.open("setup.html", "Cloudflare Account Settings", "width=500,height=350");
       });
-
-      /* ───────── Account Info Display ───────── */
 
       function updateAccountInfo() {
         var el = document.getElementById("accountInfo");
@@ -302,28 +250,18 @@
         }
       }
 
-      /* ───────── Settings ↔ Form ───────── */
-
-      const ACTION_FIELDS = [
-        "metric",
-        "timeRange",
-      ];
+      var ACTION_FIELDS = ["metric", "timeRange"];
 
       function populateActionFields() {
         ACTION_FIELDS.forEach(function (key) {
           var el = document.getElementById(key);
           if (el) el.value = actionSettings[key] || "";
         });
-        // Set FilterableSelect value
-        if (actionSettings.gatewayId) {
-          gatewayFS.value = actionSettings.gatewayId;
-        }
-        // Default selections
-        if (!actionSettings.metric) {
-          document.getElementById("metric").value = "requests";
-        }
-        if (!actionSettings.timeRange) {
-          document.getElementById("timeRange").value = "24h";
+        if (actionSettings.databaseId) {
+          databaseFS.value = actionSettings.databaseId;
+          if (actionSettings.databaseName) {
+            databaseFS.setDisplayLabel(actionSettings.databaseName);
+          }
         }
       }
 
@@ -332,21 +270,12 @@
           var el = document.getElementById(key);
           if (el) actionSettings[key] = el.value;
         });
-        // Include FilterableSelect value
-        actionSettings.gatewayId = gatewayFS.value;
-
+        actionSettings.databaseId = databaseFS.value;
         if (websocket && websocket.readyState === WebSocket.OPEN) {
-          websocket.send(
-            JSON.stringify({
-              event: "setSettings",
-              context: piUUID,
-              payload: actionSettings,
-            })
-          );
+          websocket.send(JSON.stringify({ event: "setSettings", context: piUUID, payload: actionSettings }));
         }
       }
 
-      // Bind change/input events — action fields
       ACTION_FIELDS.forEach(function (key) {
         var el = document.getElementById(key);
         if (el) {
@@ -355,97 +284,49 @@
         }
       });
 
-      /* ───────── Shared helpers ───────── */
-
       function cfHeaders(token) {
-        return {
-          Authorization: "Bearer " + token,
-          "Content-Type": "application/json",
-        };
+        return { Authorization: "Bearer " + token, "Content-Type": "application/json" };
       }
 
       function showStatus(el, msg, type) {
         el.textContent = msg;
-        el.style.color =
-          type === "error"
-            ? "#ff6b6b"
-            : type === "success"
-              ? "#4ade80"
-              : "#969696";
+        el.style.color = type === "error" ? "#ff6b6b" : type === "success" ? "#4ade80" : "#969696";
       }
 
-      /* ───────── Gateway List Fetch ───────── */
+      var databaseStatusDiv = document.getElementById("databaseStatus");
 
-      const gatewayStatusDiv = document.getElementById("gatewayStatus");
-
-      async function loadGateways() {
+      async function loadDatabases() {
         var apiToken = globalSettings.apiToken;
         var accountId = globalSettings.accountId;
-
         if (!apiToken || !accountId) {
-          showStatus(gatewayStatusDiv, "Configure account in Settings first", "error");
+          showStatus(databaseStatusDiv, "Configure account in Settings first", "error");
           return;
         }
-
-        showStatus(gatewayStatusDiv, "Loading gateways…", "info");
-
+        showStatus(databaseStatusDiv, "Loading databases…", "info");
         try {
           var resp = await fetch(
-            CF_API +
-              "/accounts/" +
-              encodeURIComponent(accountId) +
-              "/ai-gateway/gateways",
+            CF_API + "/accounts/" + encodeURIComponent(accountId) + "/d1/database",
             { headers: cfHeaders(apiToken) }
           );
-
           if (!resp.ok) {
             var errText = "HTTP " + resp.status;
-            if (resp.status === 401 || resp.status === 403) {
-              errText = "Invalid token or insufficient permissions";
-            } else if (resp.status === 404) {
-              errText = "Account not found or AI Gateway not enabled";
-            }
+            if (resp.status === 401 || resp.status === 403) errText = "Invalid token or insufficient permissions";
+            else if (resp.status === 404) errText = "Account not found";
             throw new Error(errText);
           }
-
           var data = await resp.json();
-
           if (!data.success || !Array.isArray(data.result)) {
-            var msg =
-              (data.errors && data.errors[0] && data.errors[0].message) ||
-              "Unknown API error";
+            var msg = (data.errors && data.errors[0] && data.errors[0].message) || "Unknown API error";
             throw new Error(msg);
           }
-
-          var gateways = data.result
-            .map(function (g) {
-              return { value: g.id, label: g.name || g.id };
-            })
-            .sort(function (a, b) {
-              return a.label.localeCompare(b.label);
-            });
-
-          gatewayFS.setItems(gateways);
-
-          var count = gateways.length;
-          showStatus(
-            gatewayStatusDiv,
-            count + " gateway" + (count !== 1 ? "s" : "") + " found",
-            "success"
-          );
-
-          // Auto-select if only one gateway
-          if (gateways.length === 1 && !gatewayFS.value) {
-            gatewayFS.value = gateways[0].value;
-            actionSettings.gatewayId = gateways[0].value;
-            saveActionSettings();
-          }
+          var databases = data.result.map(function (db) {
+            return { value: db.uuid, label: db.name };
+          }).sort(function (a, b) { return a.label.localeCompare(b.label); });
+          databaseFS.setItems(databases);
+          var count = databases.length;
+          showStatus(databaseStatusDiv, count + " database" + (count !== 1 ? "s" : "") + " found", "success");
         } catch (err) {
-          showStatus(
-            gatewayStatusDiv,
-            err.message || "Failed to load gateways",
-            "error"
-          );
+          showStatus(databaseStatusDiv, err.message || "Failed to load databases", "error");
         }
       }
     </script>

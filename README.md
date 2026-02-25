@@ -1,8 +1,8 @@
 # Stream Deck Cloudflare Utilities
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/pedrofuentes/stream-deck-cloudflare-utilities/releases)
+[![Version](https://img.shields.io/badge/version-1.1.3-blue.svg)](https://github.com/pedrofuentes/stream-deck-cloudflare-utilities/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-557%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-902%20passing-brightgreen.svg)](#)
 
 A [Stream Deck](https://www.elgato.com/stream-deck) plugin that provides a set of utilities to display real-time information from [Cloudflare](https://www.cloudflare.com/) directly on your Stream Deck keys.
 
@@ -30,12 +30,50 @@ Built with the [Stream Deck SDK](https://docs.elgato.com/streamdeck/sdk/introduc
   - 🔴 **Errors** — Error count
   - ⏱️ **CPU Time** — Average CPU time per request
   - Features: configurable time range (24h/7d/30d), marquee scrolling for long worker names, metric cycling via key press
+- **Pages Deployment Status** — Shows the latest deployment status of a Cloudflare Pages project:
+  - 🟢 **Success** — Deployed successfully (shows branch & commit hash)
+  - 🟡 **Building** — Build in progress
+  - 🔴 **Failed** — Build or deployment failed
+  - Features: time-ago display, marquee scrolling for long project names
+- **DNS Record Monitor** — Monitors a specific DNS record and displays its value:
+  - 🟢 **Proxied** — Record is proxied through Cloudflare
+  - 🔵 **DNS Only** — Record exists but is not proxied
+  - 🔴 **Missing** — Record not found
+  - Features: supports A, AAAA, CNAME, MX, TXT, NS, SRV, CAA record types
+- **Zone Analytics** — Displays HTTP analytics for a Cloudflare zone. Press the key to cycle through metrics:
+  - 🔵 **Requests** — Total request count
+  - 🔵 **Bandwidth** — Total bandwidth
+  - 🟢 **Cache Rate** — Cache hit rate percentage
+  - 🔴 **Threats** — Threats blocked
+  - 🟡 **Visitors** — Unique visitors
+  - Features: configurable time range (24h/7d/30d), metric cycling via key press
+- **R2 Storage Metric** — Displays R2 bucket storage metrics. Press the key to cycle through metrics:
+  - 🔵 **Objects** — Total object count
+  - 🟢 **Storage** — Total storage size
+  - 🟡 **Class A Ops** — Write operations (PutObject, DeleteObject, etc.)
+  - 🔵 **Class B Ops** — Read operations (GetObject, HeadObject)
+  - Features: configurable time range (24h/7d/30d), metric cycling via key press
+- **D1 Database Metric** — Displays D1 database analytics. Press the key to cycle through metrics:
+  - 🔵 **Reads** — Read query count
+  - 🟡 **Writes** — Write query count
+  - 🔵 **Rows Read** — Total rows read
+  - 🟡 **Rows Written** — Total rows written
+  - 🟢 **DB Size** — Database file size
+  - Features: configurable time range (24h/7d/30d), metric cycling via key press
+- **KV Namespace Metric** — Displays Workers KV namespace analytics. Press the key to cycle through metrics:
+  - 🔵 **Reads** — Read query count
+  - 🟡 **Writes** — Write query count
+  - 🔴 **Deletes** — Delete query count
+  - 🟢 **Lists** — List query count
+  - Features: configurable time range (24h/7d/30d), metric cycling via key press
+
+All actions display a clear **"Please Setup"** indicator when API credentials are missing, guiding you to configure them via the setup window.
 
 > More actions are planned — see the [Roadmap](#roadmap) section below.
 
 ### Initial Setup (API Credentials)
 
-API credentials are shared across all actions that need Cloudflare API access (Worker Deployment Status, AI Gateway Metric, Worker Analytics).
+API credentials are shared across all actions that need Cloudflare API access (Worker Deployment Status, AI Gateway Metric, Worker Analytics, Pages Deployment Status, DNS Record Monitor, Zone Analytics, R2 Storage Metric, D1 Database Metric, KV Namespace Metric).
 
 1. Add any Cloudflare action to your Stream Deck.
 2. In the Property Inspector, click **Setup** to open the credentials window.
@@ -47,9 +85,14 @@ API credentials are shared across all actions that need Cloudflare API access (W
 1. Go to **Cloudflare Dashboard → My Profile → API Tokens**.
 2. Click **Create Token** → use a **Custom Token** template.
 3. Under Permissions, add:
-   - **Account → Workers Scripts → Read** (for Worker Deployment Status)
+   - **Account → Workers Scripts → Read** (for Worker Deployment Status, Worker Analytics)
    - **Account → AI Gateway → Read** (for AI Gateway Metric)
-   - **Account → Workers Scripts → Read** (also needed for Worker Analytics)
+   - **Account → Cloudflare Pages → Read** (for Pages Deployment Status)
+   - **Account → D1 → Read** (for D1 Database Metric)
+   - **Account → Workers KV Storage → Read** (for KV Namespace Metric)
+   - **Account → Workers R2 Storage → Read** (for R2 Storage Metric)
+   - **Zone → DNS → Read** (for DNS Record Monitor)
+   - **Zone → Analytics → Read** (for Zone Analytics)
 4. Save and paste the token into the setup window.
 
 ### Setting Up Worker Deployment Status
@@ -79,6 +122,59 @@ API credentials are shared across all actions that need Cloudflare API access (W
    - **Time Range** — Data window: 24h, 7d, or 30d (default: 24h).
    - **Refresh Interval** — How often to poll (default: 60 seconds, min: 10).
 3. Press the key to cycle through metrics: Requests → Success Rate → Errors → CPU Time → (repeat).
+
+### Setting Up Pages Deployment Status
+
+1. Drag the **Pages Deployment Status** action onto a Stream Deck key.
+2. In the Property Inspector, select:
+   - **Project** — Choose from the dropdown (populated from your account).
+   - **Environment** — Production or Preview.
+3. Press the key to force an immediate refresh.
+
+### Setting Up DNS Record Monitor
+
+1. Drag the **DNS Record Monitor** action onto a Stream Deck key.
+2. In the Property Inspector, select:
+   - **Zone** — Choose from the dropdown (populated from your account).
+   - **Record Name** — Enter the full domain name to monitor (e.g., `example.com`).
+   - **Record Type** — Choose the DNS record type (A, AAAA, CNAME, MX, TXT, NS, SRV, CAA).
+3. Press the key to force an immediate refresh.
+
+### Setting Up Zone Analytics
+
+1. Drag the **Zone Analytics** action onto a Stream Deck key.
+2. In the Property Inspector, select:
+   - **Zone** — Choose from the dropdown (populated from your account).
+   - **Metric** — Which metric to display initially (default: Requests).
+   - **Time Range** — Data window: 24h, 7d, or 30d (default: 24h).
+3. Press the key to cycle through metrics: Requests → Bandwidth → Cache Rate → Threats → Visitors → (repeat).
+
+### Setting Up R2 Storage Metric
+
+1. Drag the **R2 Storage Metric** action onto a Stream Deck key.
+2. In the Property Inspector, select:
+   - **Bucket** — Choose from the dropdown (populated from your account).
+   - **Metric** — Which metric to display initially (default: Objects).
+   - **Time Range** — Data window: 24h, 7d, or 30d (default: 24h).
+3. Press the key to cycle through metrics: Objects → Storage → Class A Ops → Class B Ops → (repeat).
+
+### Setting Up D1 Database Metric
+
+1. Drag the **D1 Database Metric** action onto a Stream Deck key.
+2. In the Property Inspector, select:
+   - **Database** — Choose from the dropdown (populated from your account).
+   - **Metric** — Which metric to display initially (default: Reads).
+   - **Time Range** — Data window: 24h, 7d, or 30d (default: 24h).
+3. Press the key to cycle through metrics: Reads → Writes → Rows Read → Rows Written → DB Size → (repeat).
+
+### Setting Up KV Namespace Metric
+
+1. Drag the **KV Namespace Metric** action onto a Stream Deck key.
+2. In the Property Inspector, select:
+   - **Namespace** — Choose from the dropdown (populated from your account).
+   - **Metric** — Which metric to display initially (default: Reads).
+   - **Time Range** — Data window: 24h, 7d, or 30d (default: 24h).
+3. Press the key to cycle through metrics: Reads → Writes → Deletes → Lists → (repeat).
 
 ## Requirements
 
@@ -196,21 +292,40 @@ The output is a `.streamDeckPlugin` file ready for distribution.
 │   ├── actions/                 # Stream Deck action implementations
 │   │   ├── ai-gateway-metric.ts
 │   │   ├── cloudflare-status.ts
+│   │   ├── d1-database-metric.ts
+│   │   ├── dns-record-monitor.ts
+│   │   ├── kv-namespace-metric.ts
+│   │   ├── pages-deployment-status.ts
+│   │   ├── r2-storage-metric.ts
 │   │   ├── worker-analytics.ts
-│   │   └── worker-deployment-status.ts
+│   │   ├── worker-deployment-status.ts
+│   │   └── zone-analytics.ts
 │   ├── services/                # API clients & business logic
 │   │   ├── cloudflare-ai-gateway-api.ts
 │   │   ├── cloudflare-api-client.ts
+│   │   ├── cloudflare-d1-api.ts
+│   │   ├── cloudflare-dns-api.ts
+│   │   ├── cloudflare-kv-api.ts
+│   │   ├── cloudflare-pages-api.ts
+│   │   ├── cloudflare-r2-api.ts
 │   │   ├── cloudflare-worker-analytics-api.ts
 │   │   ├── cloudflare-workers-api.ts
+│   │   ├── cloudflare-zone-analytics-api.ts
 │   │   ├── global-settings-store.ts
 │   │   ├── key-image-renderer.ts
-│   │   └── marquee-controller.ts
+│   │   ├── marquee-controller.ts
+│   │   └── polling-coordinator.ts
 │   ├── types/                   # TypeScript type definitions
 │   │   ├── cloudflare.ts
 │   │   ├── cloudflare-ai-gateway.ts
+│   │   ├── cloudflare-d1.ts
+│   │   ├── cloudflare-dns.ts
+│   │   ├── cloudflare-kv.ts
+│   │   ├── cloudflare-pages.ts
+│   │   ├── cloudflare-r2.ts
 │   │   ├── cloudflare-worker-analytics.ts
 │   │   ├── cloudflare-workers.ts
+│   │   ├── cloudflare-zone-analytics.ts
 │   │   └── index.ts
 │   └── plugin.ts                # Plugin entry point
 ├── scripts/                     # Build & validation scripts
@@ -236,14 +351,13 @@ com.pedrofuentes.cloudflare-utilities
 
 ## Roadmap
 
-Roadmap items will be discussed and tracked in [GitHub Issues](https://github.com/pedrofuentes/stream-deck-cloudflare-utilities/issues). Future utilities may include:
+See [ROADMAP.md](ROADMAP.md) for the full roadmap. Future utilities may include:
 
-- Zone analytics dashboard
-- DNS record management
-- Firewall event monitoring
+- Token validation on save
+- Long-press to open resource in browser
 - Cache purge controls
+- Firewall event monitoring
 - SSL certificate expiry alerts
-- AI Gateway logs viewer
 
 ## Contributing
 

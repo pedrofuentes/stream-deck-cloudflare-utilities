@@ -5,6 +5,29 @@
 
 ---
 
+## v1.2.0 (February 2026)
+
+**Massive expansion — 6 new actions + visual polish!**
+
+New actions:
+• Pages Deployment Status — Monitor Cloudflare Pages projects: deployment status, branch, commit hash, and time since deploy.
+• DNS Record Monitor — Watch any DNS record (A, AAAA, CNAME, MX, TXT). See value, type, and proxy status with color-coded indicators.
+• Zone Analytics — Traffic stats for any zone: requests, bandwidth, cache rate, threats, and unique visitors. Cycle metrics with a key press.
+• R2 Storage Metric — Track R2 bucket storage: object count, payload size, and operation counts.
+• D1 Database Metric — Monitor D1 databases: rows read/written, queries, and database size.
+• KV Namespace Metric — Workers KV operation counts: reads, writes, deletes, and list operations.
+
+Visual polish:
+• Cloudflare Status now shows "last checked" timestamp on line 3 (e.g., "just now", "2m ago").
+• AI Gateway displays human-readable gateway names instead of IDs.
+• D1 Database Size label no longer shows a time range (it's a point-in-time value).
+• All truncation functions now use shared constants for consistency.
+• Internal code cleanup: marquee width uses shared LINE1_MAX_CHARS constant across all 10 actions.
+
+**Character count**: ~945
+
+---
+
 ## v1.1.3 (February 2026)
 
 **Improved setup experience & SDK update**

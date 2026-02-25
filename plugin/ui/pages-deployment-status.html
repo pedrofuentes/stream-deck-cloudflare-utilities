@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Pages Deployment Status</title>
+    <style>
+      :root {
+        --bg: #2d2d2d;
+        --bg-input: #3d3d3d;
+        --border: #565656;
+        --text: #d8d8d8;
+        --text-muted: #969696;
+        --accent: #0078d4;
+        --error: #ff6b6b;
+        --success: #4ade80;
+        --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 12px;
+        line-height: 1.4;
+        padding: 0;
+        min-height: 100vh;
+      }
+
+      .sdpi-item {
+        display: flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 4px 16px;
+        gap: 8px;
+      }
+
+      .sdpi-item-label {
+        flex: 0 0 80px;
+        text-align: right;
+        color: var(--text-muted);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .sdpi-item-value {
+        flex: 1;
+        min-width: 0;
+      }
+
+      select {
+        width: 100%;
+        background: var(--bg-input);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 4px 8px;
+        font-family: var(--font);
+        font-size: 12px;
+        outline: none;
+        cursor: pointer;
+        appearance: auto;
+      }
+
+      select:focus { border-color: var(--accent); }
+
+      .status-msg {
+        font-size: 10px;
+        color: var(--text-muted);
+        padding: 0 16px 0 96px;
+        min-height: 14px;
+      }
+
+      .separator {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 8px 16px;
+      }
+
+      .section-heading {
+        font-size: 11px;
+        font-weight: 600;
+        color: #969696;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 4px 16px 2px;
+        margin-top: 4px;
+      }
+
+      .settings-btn {
+        display: block;
+        width: calc(100% - 32px);
+        margin: 8px 16px;
+        background: var(--bg-input);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 6px 12px;
+        cursor: pointer;
+        font-family: var(--font);
+        font-size: 12px;
+        text-align: center;
+      }
+
+      .settings-btn:hover {
+        background: #4d4d4d;
+        border-color: var(--accent);
+      }
+
+      .account-info {
+        font-size: 10px;
+        color: var(--text-muted);
+        padding: 0 16px 4px;
+        font-style: italic;
+      }
+
+      .account-info.configured { color: var(--success); }
+      .account-info.not-configured { color: var(--error); }
+
+      .tips {
+        font-size: 10px;
+        color: var(--text-muted);
+        padding: 8px 16px;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <button type="button" id="openSetupBtn" class="settings-btn">
+      ⚙️ Cloudflare Account Settings
+    </button>
+    <div class="account-info" id="accountInfo">Checking account settings…</div>
+
+    <hr class="separator" />
+    <div class="section-heading">Pages Settings</div>
+
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Project</div>
+      <div class="sdpi-item-value">
+        <div id="projectContainer"></div>
+      </div>
+    </div>
+    <div class="status-msg" id="projectStatus"></div>
+
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Environment</div>
+      <div class="sdpi-item-value">
+        <select id="environment">
+          <option value="production">Production</option>
+          <option value="preview">Preview</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="tips">
+      <strong>Tip:</strong> Shows the latest deployment status — success (green),
+      building (amber), or failed (red) — with branch name and commit hash.
+    </div>
+
+    <script src="filterable-select.js"></script>
+    <script>
+      var websocket = null;
+      var piUUID = "";
+      var globalSettings = {};
+      var actionSettings = {};
+      var CF_API = "https://api.cloudflare.com/client/v4";
+
+      var projectFS = new FilterableSelect({
+        container: document.getElementById("projectContainer"),
+        setting: "projectName",
+        placeholder: "-- Select Project --",
+        searchPlaceholder: "Search projects…",
+        threshold: 8,
+        onRefresh: function () { loadProjects(); },
+        onChange: function (value) {
+          actionSettings.projectName = value;
+          saveActionSettings();
+        },
+      });
+
+      function connectElgatoStreamDeckSocket(port, uuid, registerEvent, info, actionInfo) {
+        piUUID = uuid;
+        window.piUUID = uuid;
+
+        try {
+          var action = JSON.parse(actionInfo);
+          actionSettings = action?.payload?.settings || {};
+        } catch { actionSettings = {}; }
+
+        websocket = new WebSocket("ws://127.0.0.1:" + port);
+        window.websocket = websocket;
+
+        websocket.onopen = function () {
+          websocket.send(JSON.stringify({ event: registerEvent, uuid: uuid }));
+          websocket.send(JSON.stringify({ event: "getGlobalSettings", context: uuid }));
+          populateActionFields();
+        };
+
+        websocket.onmessage = function (evt) {
+          try {
+            var data = JSON.parse(evt.data);
+            if (data.event === "didReceiveGlobalSettings") {
+              globalSettings = data?.payload?.settings || {};
+              updateAccountInfo();
+              if (globalSettings.apiToken && globalSettings.accountId && !projectFS.value) {
+                loadProjects();
+              }
+            }
+            if (data.event === "didReceiveSettings") {
+              actionSettings = data?.payload?.settings || {};
+              populateActionFields();
+            }
+          } catch { }
+        };
+      }
+
+      var setupPopup = null;
+      document.getElementById("openSetupBtn").addEventListener("click", function () {
+        if (setupPopup && !setupPopup.closed) { setupPopup.focus(); return; }
+        setupPopup = window.open("setup.html", "Cloudflare Account Settings", "width=500,height=350");
+      });
+
+      function updateAccountInfo() {
+        var el = document.getElementById("accountInfo");
+        if (globalSettings.apiToken && globalSettings.accountId) {
+          el.textContent = "✓ Account configured";
+          el.className = "account-info configured";
+        } else if (globalSettings.apiToken) {
+          el.textContent = "Token set — select an account in Settings";
+          el.className = "account-info not-configured";
+        } else {
+          el.textContent = "Not configured — click Settings above";
+          el.className = "account-info not-configured";
+        }
+      }
+
+      var ACTION_FIELDS = ["environment"];
+
+      function populateActionFields() {
+        ACTION_FIELDS.forEach(function (key) {
+          var el = document.getElementById(key);
+          if (el) el.value = actionSettings[key] || "";
+        });
+        if (actionSettings.projectName) {
+          projectFS.value = actionSettings.projectName;
+        }
+      }
+
+      function saveActionSettings() {
+        ACTION_FIELDS.forEach(function (key) {
+          var el = document.getElementById(key);
+          if (el) actionSettings[key] = el.value;
+        });
+        actionSettings.projectName = projectFS.value;
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+          websocket.send(JSON.stringify({ event: "setSettings", context: piUUID, payload: actionSettings }));
+        }
+      }
+
+      ACTION_FIELDS.forEach(function (key) {
+        var el = document.getElementById(key);
+        if (el) {
+          el.addEventListener("input", saveActionSettings);
+          el.addEventListener("change", saveActionSettings);
+        }
+      });
+
+      function cfHeaders(token) {
+        return { Authorization: "Bearer " + token, "Content-Type": "application/json" };
+      }
+
+      function showStatus(el, msg, type) {
+        el.textContent = msg;
+        el.style.color = type === "error" ? "#ff6b6b" : type === "success" ? "#4ade80" : "#969696";
+      }
+
+      var projectStatusDiv = document.getElementById("projectStatus");
+
+      async function loadProjects() {
+        var apiToken = globalSettings.apiToken;
+        var accountId = globalSettings.accountId;
+        if (!apiToken || !accountId) {
+          showStatus(projectStatusDiv, "Configure account in Settings first", "error");
+          return;
+        }
+        showStatus(projectStatusDiv, "Loading projects…", "info");
+        try {
+          var resp = await fetch(
+            CF_API + "/accounts/" + encodeURIComponent(accountId) + "/pages/projects",
+            { headers: cfHeaders(apiToken) }
+          );
+          if (!resp.ok) {
+            var errText = "HTTP " + resp.status;
+            if (resp.status === 401 || resp.status === 403) errText = "Invalid token or insufficient permissions";
+            else if (resp.status === 404) errText = "Account not found";
+            throw new Error(errText);
+          }
+          var data = await resp.json();
+          if (!data.success || !Array.isArray(data.result)) {
+            var msg = (data.errors && data.errors[0] && data.errors[0].message) || "Unknown API error";
+            throw new Error(msg);
+          }
+          var projects = data.result.map(function (p) {
+            return { value: p.name, label: p.name };
+          }).sort(function (a, b) { return a.label.localeCompare(b.label); });
+          projectFS.setItems(projects);
+          var count = projects.length;
+          showStatus(projectStatusDiv, count + " project" + (count !== 1 ? "s" : "") + " found", "success");
+        } catch (err) {
+          showStatus(projectStatusDiv, err.message || "Failed to load projects", "error");
+        }
+      }
+    </script>
+  </body>
+</html>

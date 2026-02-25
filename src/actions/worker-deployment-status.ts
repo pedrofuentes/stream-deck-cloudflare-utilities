@@ -19,7 +19,7 @@ import streamDeck, {
 
 import { CloudflareWorkersApi, formatTimeAgo, truncateWorkerName } from "../services/cloudflare-workers-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
-import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS } from "../services/key-image-renderer";
+import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
 import type { DeploymentStatus } from "../types/cloudflare-workers";
@@ -87,7 +87,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   private static readonly MARQUEE_INTERVAL_MS = 500;
 
   /** Marquee controller for scrolling long worker names. */
-  private marquee = new MarqueeController(10);
+  private marquee = new MarqueeController(LINE1_MAX_CHARS);
 
   /** Interval handle for the marquee animation timer. */
   private marqueeInterval: ReturnType<typeof setInterval> | null = null;
@@ -290,7 +290,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
         return renderKeyImage({
           line1: name,
           line2: timeAgo || "Recent",
-          line3: status?.source ?? "",
+          line3: truncateForDisplay(status?.source ?? "", LINE3_MAX_CHARS),
           statusColor: STATUS_COLORS.blue,
         });
       }
@@ -300,7 +300,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
         return renderKeyImage({
           line1: name,
           line2: timeAgo || "Gradual",
-          line3: status?.versionSplit ?? "",
+          line3: truncateForDisplay(status?.versionSplit ?? "", LINE3_MAX_CHARS),
           statusColor: STATUS_COLORS.orange,
         });
       }
@@ -310,7 +310,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
         return renderKeyImage({
           line1: name,
           line2: timeAgo || "Live",
-          line3: status?.source ?? "",
+          line3: truncateForDisplay(status?.source ?? "", LINE3_MAX_CHARS),
           statusColor: STATUS_COLORS.green,
         });
       }

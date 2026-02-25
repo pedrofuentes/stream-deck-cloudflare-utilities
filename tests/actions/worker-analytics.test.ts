@@ -8,11 +8,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   WorkerAnalytics,
-  truncateWorkerName,
   metricColor,
   formatMetricValue,
 } from "../../src/actions/worker-analytics";
 import { CloudflareWorkerAnalyticsApi } from "../../src/services/cloudflare-worker-analytics-api";
+import { truncateWorkerName } from "../../src/services/cloudflare-workers-api";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
 import type {
   WorkerAnalyticsMetrics,

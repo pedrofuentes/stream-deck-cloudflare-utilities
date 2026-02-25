@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="20" height="20">
+  <!-- D1 Database: database cylinder -->
+  <ellipse cx="10" cy="5" rx="7" ry="2.5" fill="none" stroke="white" stroke-width="1.2"/>
+  <line x1="3" y1="5" x2="3" y2="15" stroke="white" stroke-width="1.2"/>
+  <line x1="17" y1="5" x2="17" y2="15" stroke="white" stroke-width="1.2"/>
+  <ellipse cx="10" cy="15" rx="7" ry="2.5" fill="none" stroke="white" stroke-width="1.2"/>
+  <path d="M3,10 Q3,12.5 10,12.5 Q17,12.5 17,10" fill="none" stroke="white" stroke-width="0.8"/>
+</svg>
