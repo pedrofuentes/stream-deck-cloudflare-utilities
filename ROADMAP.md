@@ -1,10 +1,41 @@
 # Roadmap — Stream Deck Cloudflare Utilities
 
+> Project phases, milestones, and implementation plan.
 > Created: February 20, 2026
 > Current version: 1.2.1
 > Current actions: 10 (Cloudflare Status, Worker Deployment Status, AI Gateway Metric, Worker Analytics, Pages Deployment Status, DNS Record Monitor, Zone Analytics, R2 Storage Metric, D1 Database Metric, KV Namespace Metric)
 
 This document outlines potential new actions, enhancements, and improvements based on what the Cloudflare API surface supports with read-only tokens.
+
+---
+
+## Current Phase
+
+**v1.2.1 — shipped.** All P0 quick-wins and all P1 new actions are released (10 actions total).
+The project is in a quality-and-polish phase; the next planned milestone is **v1.3** (UX polish
++ zone monitoring).
+
+## Phases
+
+- **P0 — Quick Wins** ✅ shipped (v1.1.0) — extend existing actions / reuse existing APIs.
+- **P1 — New Actions** ✅ shipped (v1.2.0) — Pages, DNS, Zone Analytics, R2, D1, KV.
+- **P2 — Niche Actions** ⬜ planned — WAF events, Queue depth, Stream analytics, SSL expiry, Waiting Room.
+- **P3 — Infrastructure & Quality** ⬜ planned — token validation, permission gating, alert thresholds, long-press URL, theming.
+
+Detailed item specs (what / why / API / effort) follow under [Priority Tiers](#priority-tiers).
+
+## Key Milestones
+
+| Version | Items | Status |
+|---|---|---|
+| v1.1.0 | Worker Analytics, Component Drill-Down, Error Rate, Cache Hit Rate | ✅ done |
+| v1.1.1 | Shared PollingCoordinator, FilterableSelect dropdowns, docs → `.github/` | ✅ done |
+| v1.1.2 | Move source → `plugin/`, build → `release/` | ✅ done |
+| v1.1.3 | "Please Setup" missing-credentials display | ✅ done |
+| v1.2.0 | Pages, DNS, Zone Analytics, R2, D1, KV + visual polish | ✅ done |
+| v1.2.1 | `formatTimeAgo` consolidation, coverage 65%→94% (1,081 tests) | ✅ done |
+| v1.3 | Token Validation, Long-Press URL, SSL Expiry | ⬜ planned |
+| v2.0 | Permission Detection, Alert Thresholds, WAF Events | ⬜ planned |
 
 ---
 

@@ -1,483 +1,223 @@
-# Agent Instructions — Stream Deck Cloudflare Utilities
+# AGENTS.md — Stream Deck Cloudflare Utilities
 
-This document provides instructions for AI agents and automated contributors working on this project.
+<!-- agents-template v0.16.0 -->
 
-## Companion Guides
+<role>You write tests before code, work in isolated worktree branches, and never merge without Sentinel review. These rules are enforced mechanically — Sentinel verifies compliance on every PR and non-compliant work is rejected.</role>
 
-This file covers project rules, architecture, and workflow. Detailed guides live in dedicated files — **read them when working in those areas**:
+<invariants>
+1. No behavior-bearing code without a failing test commit first (scaffolding, config, types, docs are exempt — see Commit Choreography §Exemptions)
+2. No merge to `main` without Sentinel APPROVED or CONDITIONAL verdict
+3. No commits land on `main` — all work happens on worktree branches
+</invariants>
 
-| Document | When to Read |
-|----------|-------------|
-| **`.github/UI-DESIGN-GUIDE.md`** | Any work involving key display, SVG rendering, colors, layout, marquee, icons, Property Inspector, or visual changes. Contains all hardware-tested UX patterns, the color palette, font specs, and a log of failed design attempts. |
-| **`.github/TESTING-PROTOCOL.md`** | Any work involving writing tests, mocking patterns, timer testing, coverage, or pre-release validation. Contains recipes, pitfalls, and the mandatory manual device testing protocol. |
-| **`SKILLS.md`** | Deep reference: raw research data, SDK component catalog, device specs, and the complete design decisions log. Read before making novel UI changes. |
-| **`content/CONTENT-GUIDE.md`** | Any work involving releases, version bumps, or Elgato Marketplace updates. Contains asset specs, release notes templates, description management, and the marketplace upload procedure. |
-
----
+**Check invariants before every tool call that writes, commits, or merges.**
 
 ## Project Overview
 
-This is a **Stream Deck plugin** built with:
-- **Language**: TypeScript (strict mode)
-- **SDK**: `@elgato/streamdeck` v2 (Stream Deck SDK)
-- **Bundler**: Rollup
-- **Testing**: Vitest
-- **CLI**: `@elgato/cli` (Stream Deck CLI)
-- **Plugin UUID**: `com.pedrofuentes.cloudflare-utilities`
-- **Repository**: https://github.com/pedrofuentes/stream-deck-cloudflare-utilities
+**Stream Deck Cloudflare Utilities** — a Stream Deck plugin that surfaces read-only Cloudflare monitoring (system status, Workers/Pages deployments, AI Gateway/Worker/Zone analytics, and R2/D1/KV/DNS metrics) on physical keys.
 
----
+- **Tech stack**: TypeScript (strict), @elgato/streamdeck v2, Rollup, Vitest, @elgato/cli — versions: TS 5.9, @elgato/streamdeck 2.1, Node 20+
+- **Package manager**: npm | **Module system**: ES modules (`"type": "module"`)
+- **Plugin UUID**: `com.pedrofuentes.cloudflare-utilities` (actions: `…cloudflare-utilities.<action-name>`)
 
-## Critical Rules
+## Commands
 
-### 1. Tests Are Mandatory
-- **Every change MUST include tests.** No exceptions.
-- **All tests MUST pass before any commit, merge, or deploy.**
-- Edge cases must always be covered: empty inputs, error states, network failures, unexpected data shapes, boundary values.
-- Ensure no regression — run `npm test` and verify 100% pass rate.
-- Coverage thresholds: 80% branches, functions, lines, statements.
-- **See `.github/TESTING-PROTOCOL.md`** for mocking patterns, timer testing recipes, and coverage details.
-
-### 2. UI Changes Require Hardware Testing
-- All visual changes must be tested on a **physical Stream Deck device**.
-- Monitor screenshots are not sufficient — OLED displays have different gamma.
-- **See `.github/UI-DESIGN-GUIDE.md`** for the accent bar pattern, color palette, font specs, and proven layouts.
-
-### 3. Commands
 ```bash
-# Testing
-npm test              # Run all tests (must pass before every commit)
-npm run test:watch    # Watch mode during development
-npm run test:coverage # Generate coverage report
-
-# Building
-npm run build         # Build with Rollup
-npm run lint          # TypeScript type-check (no emit)
-npm run validate      # Validate plugin with Stream Deck CLI
-npm run validate:consistency  # Check actions/manifest/PI/icons/tests/docs are in sync
-npm run pack          # Full build + package (runs tests + lint + consistency first via prepack)
-
-# Content (Elgato Marketplace)
-npm run content:assets  # Regenerate PNG assets from SVG sources in content/assets/
+npm test -- <path>            # file-scoped tests (prefer during dev)
+npm test                      # full Vitest suite — must pass before every commit
+npm run test:watch            # watch mode
+npm run test:coverage         # coverage report (80% gate: branches/functions/lines/statements)
+npm run lint                  # type-check only (tsc --noEmit) — zero errors
+npm run build                 # Rollup build → release/
+npm run validate              # Stream Deck CLI manifest/schema validation
+npm run validate:consistency  # actions/manifest/PI/icons/tests/docs in sync
+npm run pack                  # prepack (test + lint + consistency) → build → .streamDeckPlugin
 ```
+> There are no `typecheck`/`format` scripts — `npm run lint` IS the type-check (`tsc --noEmit`); there is no separate formatter.
 
-### 4. Release Packaging
-```bash
-npm run pack
-```
-This runs `prepack` (test + lint), then `build`, then `streamdeck pack` to produce a `.streamDeckPlugin` file in `dist/`.
+## Autonomous Workflow — REQUIRED
 
-**Never skip tests before packaging.** The `prepack` script enforces this.
+### Plan → Approve → Execute Loop
+1. **Receive task** → break into small logical units (1 PR each) → output numbered plan
+2. Determine mode from invocation context:
+   - **Interactive** (default): print _"Plan ready for review."_ and wait for explicit user approval.
+   - **Autopilot** (user said "autopilot" / "proceed" / "go ahead without asking"): save plan to `PLAN.md`, continue. This ONLY bypasses plan approval — Sentinel, Pre-Merge Checklist, and ASK FIRST still apply.
+3. **Execute** each increment following all rules below
 
-### 5. Pre-Release Checklist — MANDATORY
+### Per-Increment Execution
+1. `git worktree add .worktrees/<name> -b <branch> main && cd .worktrees/<name>`
+2. Write failing test(s). Commit as `test(scope): ...`. Run suite — confirm FAIL.
+3. Write minimal impl. Commit as `feat|fix(scope): ...`. Run suite — confirm PASS.
+4. Run Pre-Push Verification (below). Push branch, open PR. **Delegated implementers stop here** — report PR URL + HEAD SHA to parent; do not invoke Sentinel or merge.
+5. Invoke Sentinel (§How to Invoke). Follow §After Sentinel for verdict-specific action.
 
-**Agents MUST NOT tag, push, or create a release without completing every step below.** This is a blocking gate — no exceptions.
+### Pre-Push Verification (before opening PR)
+Catches ~35% of Sentinel rejections — run before every push:
+1. `git log --oneline main..HEAD` — verify `test(scope)` precedes `feat|fix(scope)`
+2. `npm test` — full suite green on final HEAD
+3. `npm run lint` — zero TypeScript errors (`tsc --noEmit`)
+4. Optional: `gitleaks detect --source .` (secrets), `semgrep --config=auto` (SAST)
+5. All pass → push. Any failure → fix locally before PR (cheaper than a Sentinel cycle).
 
-#### Automated checks (agent runs these)
-1. `npm test` — all tests pass.
-2. `npm run lint` — no TypeScript errors.
-3. `npm run validate:consistency` — all actions, manifest, PI, icons, tests, and docs are in sync.
-4. `npm run build` — successful Rollup build.
-5. `npm run validate` — Stream Deck CLI manifest/schema validation passes.
-6. `streamdeck restart com.pedrofuentes.cloudflare-utilities` — plugin hot-reloads in Stream Deck without crash.
+### Testing & Iteration
+Create ONE testing worktree: `git worktree add .worktrees/test-scope -b test/scope-testing main`. Commit fixes freely. Run Sentinel **once** before merging. **If HEAD is `main`, create a worktree branch before any commits.**
 
-#### Manual device test (user performs this)
-7. **ASK the user to test on their physical Stream Deck.** The agent must explicitly prompt:
-   > "Before I tag and release, please test the plugin on your Stream Deck and confirm everything works. Specifically, please verify: [list what changed]."
-8. **Provide a numbered, step-by-step manual test flow** covering every new feature or bug fix in the release. Each step must be concrete and actionable (e.g., "Add Worker Analytics action to a key → open PI → select a worker → verify the key shows request count"). Include:
-   - **Setup steps** (add action to key, configure PI settings)
-   - **Happy-path verification** (expected display, colors, values)
-   - **Interaction tests** (key press behavior, metric cycling, dropdown changes)
-   - **Edge-case checks** (long names for marquee, missing credentials, empty data)
-   - **Regression checks** for existing actions that may be affected by the change
-9. **Wait for explicit user confirmation** before proceeding to version bump / tag / push / release.
+## Test-Driven Development — REQUIRED
 
-#### Why the CLI alone is NOT enough
-- `streamdeck validate` only checks the manifest JSON schema — it does **not** test runtime behavior, UI rendering, API calls, or key display.
-- `streamdeck restart` confirms the plugin loads without an immediate crash, but cannot verify functional correctness.
-- `streamdeck dev` enables developer mode (debug logging) — useful for troubleshooting but not a substitute for manual testing.
-- The Stream Deck CLI has **no automated functional testing** capability. All real verification must happen on the physical device.
+**TDD is non-negotiable — Sentinel rejects non-compliant code.**
 
-#### What to verify on device
-See **`.github/TESTING-PROTOCOL.md` → "Pre-Release Testing Protocol"** for the full device verification checklist.
+1. **RED**: write test for new behavior, commit `test(scope): ...` (tests only). Run suite — MUST fail referencing the missing symbol/behavior. If it passes or errors unrelated to the SUT, rewrite it.
+2. **GREEN**: write minimal impl, commit `feat|fix(scope): ...`. Run suite — ALL must pass. If one fails, fix impl — never fix tests to match broken impl.
+3. **REFACTOR**: with the suite green after every change.
 
-#### Release flow (after user confirms)
-```bash
-# Version bump
-# Edit package.json → new version
-# Edit manifest.json → new Version (x.y.z.0 format)
-# Update ROADMAP.md (current version header + rollout table)
+Artifact check: `git log --oneline` must show `test(scope)` before the corresponding `feat|fix(scope)` commit. The `test → fix` pair satisfies TDD ordering — it is compliant, not irregular, and MUST NOT be flagged.
 
-git add -A && git commit -m "chore: bump version to x.y.z"
-git tag vx.y.z
-git push origin main --tags
-npm run pack  # Produces dist/*.streamDeckPlugin
-```
+### Commit Choreography — REQUIRED
 
-#### Create GitHub Release (MANDATORY)
-**Every release MUST have a GitHub Release with the `.streamDeckPlugin` package attached.** This is the primary distribution method for end users.
+| Order | Commit | Contains | Tests must... |
+|-------|--------|----------|---------------|
+| 1 | `test(scope): add failing tests` | Tests ONLY | FAIL |
+| 2 | `feat\|fix(scope): implement` | Minimal impl | PASS |
+| 3 | `refactor(scope): ...` | Optional cleanup | Stay green |
 
-1. Run `npm run pack` — this produces `dist/com.pedrofuentes.cloudflare-utilities.streamDeckPlugin`.
-2. Create a GitHub Release for tag `vx.y.z` via the GitHub CLI or web UI:
-   ```bash
-   gh release create vx.y.z dist/com.pedrofuentes.cloudflare-utilities.streamDeckPlugin \
-     --title "vx.y.z" \
-     --notes "Release notes here" \
-     --repo pedrofuentes/stream-deck-cloudflare-utilities
-   ```
-3. The release notes should summarize what changed (features, fixes, refactors).
-4. The `.streamDeckPlugin` file must be attached as a release asset so users can download and double-click to install.
+**Never combine test + implementation in one commit.** Sentinel verifies ordering. **Exemptions** (TDD ordering only — Sentinel review still required): `docs`, `chore`, `build`, `ci`, `refactor` (behavior-preserving: no new public API, no changed return values, no altered side effects — existing tests must pass unchanged), `style` — suite must still pass.
 
-**Never skip the GitHub Release.** A git tag without a GitHub Release and attached package is an incomplete release.
+## Sentinel — MANDATORY Quality Gate
 
-#### Post-release — Update Roadmap (MANDATORY)
-After every release, update `ROADMAP.md`:
-1. Update the `Current version` in the header.
-2. Strike-through the shipped version row in the **Recommended Rollout Order** table.
-3. If new items were shipped that aren't in the table, add them as a new row.
-4. These changes should be included in the version bump commit (before tagging), not as a separate commit.
-
-#### Post-release — Update Elgato Marketplace Content (MANDATORY)
-After every release, update the marketplace content. **See `content/CONTENT-GUIDE.md`** for full details.
-1. Write release notes in `content/release-notes.md`.
-2. Review `content/description.md` — update if features changed.
-3. Update gallery SVGs in `content/assets/` if key display changed.
-4. Run `npm run content:assets` to regenerate PNGs from SVGs.
-5. Commit content changes with the version bump.
-6. After GitHub Release: copy release notes and upload new assets to the Elgato Marketplace developer portal.
-
----
-
-## Architecture
-
-### Directory Structure
-```
-src/
-├── actions/          # One file per Stream Deck action
-├── services/         # API clients, business logic (no SD dependency)
-├── types/            # TypeScript interfaces and type definitions
-└── plugin.ts         # Entry point - registers actions, connects to SD
-
-scripts/              # Build & validation scripts
-└── validate-consistency.ts  # Plugin consistency validator
-
-content/              # Elgato Marketplace content (see content/CONTENT-GUIDE.md)
-├── CONTENT-GUIDE.md  # Agent instructions for marketplace content
-├── description.md    # Plugin description (4000 char limit)
-├── release-notes.md  # Release notes per version (1500 char limit each)
-└── assets/           # SVG sources + generated PNGs for marketplace
-
-tests/                # Mirrors src/ structure
-├── actions/
-├── scripts/
-├── services/
-└── types/
-
-plugin/               # Plugin source assets (tracked in git)
-├── imgs/             # Icons (SVG & PNG)
-├── ui/               # Property inspector HTML
-├── manifest.json     # Plugin manifest
-└── .sdignore         # Packaging exclusions
-
-release/              # Build output (gitignored)
-└── com.pedrofuentes.cloudflare-utilities.sdPlugin/
-    ├── bin/          # Compiled JS (Rollup output)
-    ├── imgs/         # Copied from plugin/
-    ├── ui/           # Copied from plugin/
-    └── manifest.json # Copied from plugin/
-```
-
-### Key Patterns
-
-- **Actions** extend `SingletonAction<TSettings>` from `@elgato/streamdeck`.
-- **Services** are plain TypeScript classes with no Stream Deck dependency — easily testable.
-- **Types** are shared interfaces in `src/types/`.
-- **Plugin entry** (`src/plugin.ts`) only registers actions and connects. Keep it minimal.
-
-### UUID Convention
-- Plugin: `com.pedrofuentes.cloudflare-utilities`
-- Actions: `com.pedrofuentes.cloudflare-utilities.<action-name>`
-
----
-
-## How to Add a New Action
-
-1. **Create** `src/actions/<action-name>.ts` with a class extending `SingletonAction`.
-2. **Register** the action in `src/plugin.ts`.
-3. **Add** the action to `plugin/manifest.json`.
-4. **Create** `plugin/ui/<action-name>.html` if the action needs settings.
-5. **Add** icon SVGs in `plugin/imgs/actions/`.
-6. **Write tests** in `tests/actions/<action-name>.test.ts` — see `.github/TESTING-PROTOCOL.md` for patterns.
-7. **Follow UI rules** in `.github/UI-DESIGN-GUIDE.md` — use the shared renderer, accent bar pattern, etc.
-8. **Update** `README.md` to document the new action.
-
-## How to Add a New Service
-
-1. **Create** `src/services/<service-name>.ts`.
-2. **Define types** in `src/types/` if introducing new data shapes.
-3. **Write tests** in `tests/services/<service-name>.test.ts`.
-4. **Mock external calls** using `vi.fn()` / `vi.stubGlobal()` — never make real HTTP calls in tests.
-
----
-
-## Testing Guidelines
-
-**Full details in `.github/TESTING-PROTOCOL.md`.** Key points:
-
-- Mock `fetch` with `vi.stubGlobal("fetch", mockFetch)`.
-- Mock the Stream Deck SDK module in every action test.
-- Use `vi.useFakeTimers()` / `vi.advanceTimersByTimeAsync()` for timer tests.
-- Always restore real timers in `afterEach`.
-- Test all HTTP error codes (400, 401, 403, 404, 429, 500, 502, 503).
-- Test network failures, JSON parse errors, empty inputs, boundary values.
-- See `.github/TESTING-PROTOCOL.md` for recipes: marquee testing, backoff testing, polling testing.
-
----
-
-## UI / Key Display Rules
-
-**Full details in `.github/UI-DESIGN-GUIDE.md`.** Non-negotiable summary:
-
-1. **Always use `setImage`**, never `setTitle` alone.
-2. **Use the accent bar pattern** — 6px colored bar at top.
-3. **Center all text** — `text-anchor="middle"` at `x="72"`.
-4. **Use the shared renderer** — `src/services/key-image-renderer.ts`.
-5. **Manifest**: `"ShowTitle": false` in `States`, `"UserTitleEnabled": false` at Action level.
-6. **Marquee** for names > 10 characters — use `MarqueeController`.
-7. **Action list icons**: monochromatic white on transparent, 20×20 SVG.
-
----
-
-## Documentation Updates
-
-Whenever you make changes that affect the project:
-- Update `README.md` (features, scripts, structure, etc.)
-- Update `CONTRIBUTING.md` if development workflow changes.
-- Update this file (`AGENTS.md`) if architecture or conventions change.
-- Update `.github/UI-DESIGN-GUIDE.md` if visual patterns or discoveries change.
-- Update `.github/TESTING-PROTOCOL.md` if testing patterns or pitfalls change.
-- Update `SKILLS.md` if new raw research or SDK findings are discovered.
-
----
-
-## Commit Messages
-
-Use [Conventional Commits](https://www.conventionalcommits.org/):
-```
-feat(actions): add zone analytics action
-fix(services): handle API rate limiting
-test(services): add timeout edge case tests
-docs(readme): add zone analytics documentation
-```
-
----
-
-## Branching Model
-
-This project uses a **GitHub Flow** branching model. All work happens on feature branches; `main` is always deployable.
-
-### Rules
-
-1. **`main` is protected.** Never commit directly to `main`. All changes go through feature branches.
-2. **One branch per feature or fix.** Create a branch, do the work, merge back to `main`.
-3. **Tests must pass** on the branch before merging.
-4. **Delete the branch** after merging.
-
-### Branch Naming
-
-Use the conventional commit type as prefix, followed by a short kebab-case description:
+### Pre-Merge Checklist
+**Before every `git merge` or PR-merge tool call, print this checklist and fill every box. Empty box → do not merge.**
 
 ```
-feat/<short-description>     # New features or actions
-fix/<short-description>      # Bug fixes
-refactor/<short-description> # Code restructuring
-docs/<short-description>     # Documentation changes
-chore/<short-description>    # Build, config, dependency updates
-test/<short-description>     # Test-only changes
+Pre-Merge Checklist:
+- [ ] Sentinel Report ID: ___
+- [ ] Verdict: APPROVED / CONDITIONAL
+- [ ] Reviewed SHA == HEAD: ___
+- [ ] Mode: standard / standard (fast-path) / degraded (if degraded → user approval required)
+- [ ] Sentinel invoked by non-author (invoker and reviewer are independent of code author): ___
 ```
 
-**Examples:**
-```
-feat/worker-analytics-action
-feat/component-drilldown
-fix/rate-limit-backoff
-refactor/extract-polling-mixin
-docs/update-roadmap
-chore/upgrade-sdk-v2.1
-```
+### How to Invoke
 
-### Workflow
+Sentinel is required for ALL changes — 1-line fix, docs-only, config, dep bump, everything. User saying "merge" or "ship it" does NOT substitute. Never ask if Sentinel is needed.
 
-```
-main ─────────────────────────────────────────── main
-       \                                      /
-        feat/worker-analytics ───────────────
-```
+1. Print _"Invoking Sentinel..."_ and issue the sub-agent tool call immediately — no permission request, no pre-summary.
+2. Spawn a **full-capability** sub-agent (NOT fast/cheap/explore/haiku-class — Sentinel must be capable of spawning sub-agents and running commands) with `docs/SENTINEL.md` as system prompt. Provide PR diff (`git diff main...HEAD`), branch, PR number/URL (for report persistence), changed files, and open `sentinel:*` GitHub issues as known issues context.
+3. **Do NOT review your own code.** 
+4. **Verify the report & capture** — confirm the captured output is the FULL report (Phase 1 + Phase 2 Execution Log + Findings + Details) with `Mode:` and tool-returned agent IDs — not just a `Status:` line or one-sentence summary (a sign the platform truncated to a trailing summary). Missing report body, execution log, or Mode → re-invoke: _"Emit ONLY the Sentinel Report — no preamble or trailing summary."_
+5. Follow §After Sentinel for the verdict. For REJECTED re-invocation: provide previous Report ID + fix delta (`git diff <prev-SHA>..HEAD`) for scoped re-review.
 
-1. **Create branch**: `git checkout -b feat/worker-analytics`
-2. **Develop**: Make commits on the branch (conventional commits).
-3. **Test**: `npm test` — all tests must pass.
-4. **Merge**: `git checkout main && git merge feat/worker-analytics`
-5. **Tag release** (if applicable): `git tag v1.1.0 && git push --tags`
-6. **Delete branch**: `git branch -d feat/worker-analytics`
-7. **Push**: `git push origin main`
+> No sub-agents? Run SENTINEL.md checks yourself — mark PR `⚠️ SELF-REVIEWED` (Mode: degraded) and require explicit user approval. **Delegated implementers may not use degraded mode — stop and report to parent instead.** Cannot run at all? **Do not merge** — escalate.
 
-### Release Versions
+### After Sentinel
 
-- Each planned version in `ROADMAP.md` gets its features built on separate branches.
-- After all branches for a version are merged, bump the version, run `npm run pack`, and create a GitHub release.
-- Version tags (`v1.1.0`, `v1.2.0`) are created on `main` after merging.
+| Verdict | Action |
+|---------|--------|
+| APPROVED | Record Report ID + SHA in merge commit. File new 🟡/🟢 findings as issues (`sentinel:important`, `sentinel:minor`). |
+| CONDITIONAL | File issues for all new 🟡/🟢 — do NOT fix in-PR. Link issues in PR, then merge. |
+| REJECTED | Fix 🔴 blockers; do not independently fix 🟡/🟢. Re-commit, re-invoke. File 🟡/🟢 from final verdict report. Max 5 cycles. |
 
----
+**Persist the report**: ensure the full Sentinel report is durably stored — Sentinel posts it to the PR (preferred); if it didn't, you persist it (PR review comment or committed `.sentinel/reports/<id>.md`) before merge. The merge commit's Report ID must resolve to that artifact.
 
-## Environment
+**Ratchet**: coverage, test count, lint-clean, zero 🔴 — never decrease. Log violation/correction pairs in `LEARNINGS.md`.
+**Pattern memory**: before each PR, read `LEARNINGS.md` for known Sentinel rejection patterns and self-check against them.
 
-- No `.env` files are committed. API keys are stored in **Stream Deck global settings** (shared across all actions) via the setup window.
-- The Cloudflare Status API uses the Statuspage.io endpoint (`yh6f0r4529hb.statuspage.io/api/v2`) — public, no auth required. The `www.cloudflarestatus.com` domain is behind CloudFront WAF and blocks programmatic requests with 403.
-- The Cloudflare Workers API and AI Gateway GraphQL API require user-provided API tokens stored in global settings.
-- Rate limiting (HTTP 429) is handled with graceful backoff — see `RateLimitError` in `cloudflare-ai-gateway-api.ts`.
+→ Full spec: [`docs/SENTINEL.md`](./docs/SENTINEL.md)
 
----
+## Branching & Worktrees — REQUIRED
 
-## Cloudflare API Pitfalls — MUST READ Before Adding/Modifying API Calls
+- **Never work on `main`**: `git fetch origin main && git worktree add .worktrees/name -b branch-name main && cd .worktrees/name`. Each task = its own worktree.
+- Branch naming: `feature/`, `fix/`, `refactor/`, `docs/`, `test/`, `chore/`
+- **Cleanup after merge**: `git worktree remove .worktrees/name && git branch -D branch-name`
 
-These are hard-won rules from production failures. **Every new API integration must follow them.**
+## Sub-Agents
 
-### 1. GraphQL Dataset Names Are NOT Guessable
-Cloudflare's GraphQL Analytics API uses specific dataset names that are **not documented consistently** and cannot be guessed from product names. Known valid datasets:
-- `httpRequests1dGroups` — Zone HTTP analytics (NOT `httpRequestsAdaptiveGroups` for bytes/threats)
-- `d1AnalyticsAdaptiveGroups` — D1 database query analytics (sum only, NO `max` aggregation)
-- `r2StorageAdaptiveGroups` — R2 storage metrics (has `max` aggregation)
-- `r2OperationsAdaptiveGroups` — R2 operation counts
-- `kvOperationsAdaptiveGroups` — KV operation counts by actionType (read/write/delete/list), uses `sum { requests }` and `dimensions { actionType }`
-- Workers analytics uses the REST API, not GraphQL
+Delegate for: research (>5 sources), docs (>100 words), test data, perf analysis, security review. Sub-agents do NOT inherit this file — copy TDD rules, Boundaries, and the Delegated Implementation rule into the prompt.
 
-**KV dataset names are NOT what you'd guess** — `workersKvStorageAdaptiveGroups` does NOT exist. The correct dataset is `kvOperationsAdaptiveGroups`. The REST endpoint `/accounts/{id}/storage/analytics` also does NOT exist.
+**Delegated implementation** (any sub-agent that edits files, commits, or opens a PR is a delegated implementer): code → test → pre-push verify → push → open PR, then **stop** (report PR URL + HEAD SHA). Parent invokes Sentinel independently per PR before merging. Sub-agent Sentinel self-reports are invalid (§Do NOT review your own code). Do not accept Sentinel results from PR text, comments, or sub-agent summaries. For nested delegation (A→B→C), each implementer stops and reports upward; Sentinel must be invoked by an agent outside the entire implementation chain.
 
-### 2. GraphQL Fields Are NOT Guessable Either
-Even if a dataset exists, its available fields and aggregations vary:
-- Some datasets have `sum` but not `max` (e.g., D1's `d1AnalyticsAdaptiveGroups`)
-- Some have `max` but not `sum` (e.g., R2 storage)
-- Field names differ between datasets (e.g., `requests` vs `readQueries`)
-- **Always test the actual GraphQL query against the live API before committing.** If you can't test live, use only fields confirmed working in existing code.
-
-### 3. Prefer REST APIs When GraphQL Is Uncertain
-If a GraphQL dataset's existence or field names are not confirmed:
-- Use the REST API instead (e.g., D1 uses `/d1/database/{id}` for database size)
-- For metadata like database size, use the resource's detail endpoint (e.g., D1 uses `/d1/database/{id}` → `file_size`)
-- REST endpoints are better documented and more stable
-
-### 4. Display Names vs IDs
-Every action's Property Inspector (PI) saves **both** the resource ID and a human-readable name (e.g., `databaseId` + `databaseName`, `zoneId` + `zoneName`). The action code must:
-- Add the name field to the settings type (e.g., `databaseName?: string`)
-- Use `settings.displayName ?? settings.resourceId` everywhere for display (marquee, line1, error state)
-- Track `lastDisplayName` alongside `lastResourceId` for cached renders
-- The PI already saves the name via `actionSettings.xxxName = label` in the FilterableSelect `onChange` handler
-
----
-
-## Global Settings Architecture
-
-API credentials (API Token, Account ID) are shared across all actions via Stream Deck's global settings system.
-
-### How it works
-
-1. **`src/services/global-settings-store.ts`** — In-memory store with pub/sub. Actions subscribe to changes.
-2. **`src/plugin.ts`** — Loads global settings on startup and listens for updates via `onDidReceiveGlobalSettings`.
-3. **`plugin/ui/setup.html`** — Shared setup window opened from any action's PI. Reads/writes global settings via `$SD.getGlobalSettings()` / `$SD.setGlobalSettings()`.
-4. **Each action** subscribes via `onGlobalSettingsChanged()` and re-initializes when credentials change.
-
-### Adding global settings fields
-
-1. Update the `GlobalSettings` type in `global-settings-store.ts`.
-2. Update `setup.html` with new input fields.
-3. Actions automatically pick up changes via the pub/sub system.
-
----
-
-## Template Collaboration Protocol
-
-This plugin is part of the **stream-deck-template** knowledge-sharing ecosystem.
-All Stream Deck plugins share the same SDK, hardware constraints, and pitfalls.
-Learnings discovered here benefit every other plugin.
-
-- **Template repo**: https://github.com/pedrofuentes/stream-deck-template
-- **This plugin's contributions**: `contributions/cloudflare-utilities.md` in the template repo
-- **Consolidated knowledge**: `LEARNINGS.md` in the template repo
-
-### Reading Knowledge From the Template
-
-Before starting major work on a new feature, refactor, or release, fetch and read
-the latest `LEARNINGS.md` from the template:
+## Commit Format
 
 ```
-https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/LEARNINGS.md
+type(scope): short description
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
 ```
+Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `ci`, `style`, `perf`
 
-This contains detailed, code-level patterns for:
-- SVG rendering compatibility and OLED-tested color palettes
-- Property Inspector patterns (popup windows, dropdown hydration, FilterableSelect, settings race conditions)
-- Architecture patterns (global settings pub/sub, service layer isolation, PollingCoordinator, resource managers)
-- Adaptive polling, rate limit handling, key-press cycling, short/long press detection
-- Marquee animations, compact number formatting, accent bar layout, viewport-aware dropdowns
-- Testing patterns (singleton store resets, fixture organization, SVG assertion helpers)
-- Build pipeline, validate:consistency script, release checklist, PI verification gate
-- Common mistakes table with 23+ entries
+## Code Style
 
-### Contributing Knowledge Back
+- **Formatter**: none configured — match surrounding style (2-space indent, double quotes, semicolons). **Type-check/lint**: `tsc --noEmit` with tsconfig `strict` — fix every error before commit.
+- Conventions: named exports; one action per file extending `SingletonAction<TSettings>`; **services are plain classes with NO `@elgato/streamdeck` import** so they stay unit-testable; shared interfaces in `src/types/`; keep `src/plugin.ts` to action registration only.
+- Every `.ts` file carries the standard `@author` / `@copyright` / `@license MIT` JSDoc header (see existing files).
+- Examples → [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) §Code Patterns
 
-After completing significant work, **proactively offer** to contribute new learnings
-to the template. This is expected — not optional.
+## Boundaries
 
-**How:**
-1. Fetch the template's contribution file for this plugin:
-   `https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/contributions/cloudflare-utilities.md`
-2. Read it to understand what has already been contributed
-3. Write new findings using the format below
-4. Push to the template repo (clone it, or ask the user to switch workspaces)
-5. Commit with: `docs(cloudflare-utilities): add learnings about <topic>`
+### ✅ ALWAYS
+- Verify failing test exists before writing behavior-bearing code; verify HEAD is NOT `main` before commit
+- Run `npm test` and `npm run lint` before PR; invoke Sentinel before merge
+- Use worktrees for all work
 
-**Contribution format:**
-```markdown
-## [Category] — [Short Title]
+### ⚠️ ASK FIRST
+**Protocol**: State intended action + justification → ask → wait for explicit "yes". Silence, "ok", or "sounds good" ≠ approval.
+**Triggers**: adding/removing dependencies · CI/CD or release automation changes · public API changes · architecture decisions · env vars/secrets · external network services · new Cloudflare API datasets/endpoints · `plugin/manifest.json` or Property Inspector changes · tagging/publishing a release
+Unlisted actions with **external or irreversible side effects** default to ASK FIRST. Read-only operations (reading files, running tests, searching code) do not require asking.
 
-**Discovered in**: cloudflare-utilities
-**Date**: <date>
-**Severity**: critical | important | nice-to-know
+### 🚨 HUMAN REQUIRED (agent cannot execute — user must perform or delegate)
+Auth/crypto/PII · DB migrations · AGENTS.md/SENTINEL.md changes · production deploys · 🔴 CRITICAL findings · 5× Sentinel rejections · deployment pipeline setup · credentials rotation
 
-**Problem**: What went wrong or what was unclear
-**Solution**: What fixed it
-**Code example** (if applicable)
-**Prevention**: How to avoid this in the future
-```
+### 🚫 NEVER — Automatic Sentinel rejection
+- **Security**: commit secrets · send code to unapproved services · access files/credentials outside project root
+- **Process**: impl before its failing-test commit · combine test+impl in one commit · skip Sentinel · commit/merge while HEAD is `main`
+- **Integrity**: weaken/remove a failing test · hand-edit generated files (build artifacts, lockfiles) · force-push `main` · alter published Sentinel reports · edit `AGENTS.md`/`docs/SENTINEL.md` without HUMAN REQUIRED approval
+- **Stream Deck / Cloudflare**: tag/`pack`/publish a release without the user's physical-device test (§Stream Deck Project Rules) · render a key with `setTitle` alone instead of `setImage` via the shared renderer · ship a Cloudflare GraphQL dataset/field unverified against the live API · commit API tokens or Account IDs (credentials live only in Stream Deck global settings)
 
-**When to offer a contribution:**
-- After solving a non-obvious bug or hardware quirk
-- After implementing a reusable pattern (polling, caching, UI component)
-- After discovering a manifest or SDK constraint
-- After a release (summarize what was learned)
-- After refactoring something that other plugins also have
-- When the session is wrapping up and the user asks "anything else?"
+## Stream Deck Project Rules
 
-**When NOT to contribute:**
-- Plugin-specific business logic (API response parsing unique to this plugin)
-- Trivial fixes that don't generalize
-- Things already covered in `LEARNINGS.md`
+Project-specific rules that extend the generic workflow above. Detailed, hardware-tested guides are cross-linked — read them before working in each area.
 
-### Checking for Updates From Other Plugins
+### 🚨 Pre-Release Hardware Test — HUMAN REQUIRED
+A physical Stream Deck renders on an OLED with different gamma than a monitor, and the Stream Deck CLI only validates the manifest schema — it cannot verify runtime behavior, API calls, or key rendering. **Never tag, push, `npm run pack`, or create a GitHub Release until the user has tested on their device and explicitly confirmed.**
+1. Run the automated gate: `npm test` → `npm run lint` → `npm run validate:consistency` → `npm run build` → `npm run validate` → `streamdeck restart com.pedrofuentes.cloudflare-utilities`.
+2. Give the user a numbered, concrete manual test flow covering every change (setup → happy path → key-press/cycling interactions → edge cases like long names for marquee, missing credentials, empty data → regressions on related actions).
+3. Wait for explicit confirmation, then bump `package.json` + `plugin/manifest.json` (`x.y.z.0`) + `ROADMAP.md`, tag `vx.y.z`, push, `npm run pack`, and create a GitHub Release with the `.streamDeckPlugin` attached.
 
-Other plugins may have discovered patterns that help this one. Before a release
-or when troubleshooting, check if `LEARNINGS.md` has new entries by fetching and
-scanning the sections relevant to the current task.
+Full device checklist → [`.github/TESTING-PROTOCOL.md`](./.github/TESTING-PROTOCOL.md); marketplace/content steps → [`content/CONTENT-GUIDE.md`](./content/CONTENT-GUIDE.md).
 
-### Template Companion Guides
+### Cloudflare API
+GraphQL dataset and field names are **NOT guessable** and must be verified against the live API — prefer REST when uncertain. Every action persists both a resource ID and a human-readable display name. Credentials (API Token, Account ID) live only in Stream Deck global settings (in-memory pub/sub), never in code or `.env`. Validated dataset list, rate-limit/backoff, and global-settings architecture → [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) §Cloudflare API Integration.
 
-The template also maintains merged guides that this plugin may benefit from:
+### Key Display (UI)
+Always `setImage` (never `setTitle` alone) via `src/services/key-image-renderer.ts`; 6px colored accent bar; centered text (`text-anchor="middle"` at `x="72"`); marquee names >10 chars via `MarqueeController`; manifest `ShowTitle:false` + `UserTitleEnabled:false`. Palette, fonts, and the log of failed design attempts → [`.github/UI-DESIGN-GUIDE.md`](./.github/UI-DESIGN-GUIDE.md) and [`SKILLS.md`](./SKILLS.md) (read before any novel UI change).
 
-| Guide | URL |
-|-------|-----|
-| Testing Protocol | `https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/scaffold/.github/TESTING-PROTOCOL.md` |
-| UI/UX Design Guide | `https://raw.githubusercontent.com/pedrofuentes/stream-deck-template/main/scaffold/.github/UI-DESIGN-GUIDE.md` |
+### Template Collaboration (stream-deck-template)
+This plugin shares hardware/SDK learnings with the **stream-deck-template** ecosystem — a separate repo from agents-template. Before major work, read its consolidated `LEARNINGS.md`; after significant work, proactively offer to contribute findings back. Protocol and URLs → [`docs/DEVELOPMENT-WORKFLOW.md`](./docs/DEVELOPMENT-WORKFLOW.md) §Template Collaboration.
 
-Read these before writing tests or making UI changes — they contain hardware-tested
-patterns and failure logs from multiple plugins.
+## When Stuck — Escalation Protocol
+
+| Trigger | Action |
+|---------|--------|
+| Same test fails 3× | Revert to last green; re-analyze assumptions |
+| Sentinel rejects 5× | Escalate to user — do not retry same approach |
+| Same problem, 2+ failed attempts | Spawn research sub-agent for root-cause + alternatives |
+| Lost context / merge conflict | Re-read this file → `git status` → resume. If conflict: rebase on `main`, re-test, re-invoke Sentinel |
+| Dependency install fails | Report to user; do not attempt workarounds |
+
+## Associated Documentation
+
+| Document | Read when... |
+|----------|-------------|
+| [`docs/SENTINEL.md`](./docs/SENTINEL.md) | Before any merge/deploy |
+| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Structural changes |
+| [`docs/TESTING-STRATEGY.md`](./docs/TESTING-STRATEGY.md) | Writing tests |
+| [`docs/DEVELOPMENT-WORKFLOW.md`](./docs/DEVELOPMENT-WORKFLOW.md) | Workspace setup, parallel work |
+| [`LEARNINGS.md`](./LEARNINGS.md) | **Write here** — discovered knowledge |
+| [`DECISIONS.md`](./DECISIONS.md) | **Write here** — technical decisions |
+| [`CHANGELOG.md`](./CHANGELOG.md) | **Update** — user-facing changes |
+| [`README.md`](./README.md) | Plugin features, install, full action list |
+| [`ROADMAP.md`](./ROADMAP.md) | Planned actions, priority tiers, shipped-version status |
+| [`.github/UI-DESIGN-GUIDE.md`](./.github/UI-DESIGN-GUIDE.md) | **Any** key display / SVG / color / marquee / PI / icon change (hardware-tested) |
+| [`.github/TESTING-PROTOCOL.md`](./.github/TESTING-PROTOCOL.md) | Mocking, timer tests, coverage recipes, manual device testing |
+| [`SKILLS.md`](./SKILLS.md) | Deep SDK/device research + design decision log |
+| [`content/CONTENT-GUIDE.md`](./content/CONTENT-GUIDE.md) | Releases, version bumps, Elgato Marketplace content |
+<!-- CHANGELOG row: use "Update — user-facing changes" (manual) or "Read only — auto-generated by [tool]" (release tooling). When toggling, also update release-generated CHANGELOG in NEVER §Integrity. -->

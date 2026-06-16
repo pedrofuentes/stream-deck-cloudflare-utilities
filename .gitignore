@@ -31,3 +31,6 @@ npm-debug.log*
 
 # Stream Deck package output
 *.streamDeckPlugin
+
+# Agent config migration backup (temporary; safe to delete after verifying the migration)
+.agent-backup/
