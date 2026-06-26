@@ -1,6 +1,6 @@
 # AGENTS.md — Stream Deck Cloudflare Utilities
 
-<!-- agents-template v0.18.0 -->
+<!-- agents-template v0.19.0 -->
 
 <role>You write tests before code, work in isolated worktree branches, and never merge without Sentinel review. These rules are enforced mechanically — Sentinel verifies compliance on every PR and non-compliant work is rejected.</role>
 
@@ -213,7 +213,7 @@ This plugin shares hardware/SDK learnings with the **stream-deck-template** ecos
 | [`docs/DEVELOPMENT-WORKFLOW.md`](./docs/DEVELOPMENT-WORKFLOW.md) | Workspace setup, parallel work |
 | [`LEARNINGS.md`](./LEARNINGS.md) | **Write here** — discovered knowledge |
 | [`DECISIONS.md`](./DECISIONS.md) | **Write here** — technical decisions |
-| [`CHANGELOG.md`](./CHANGELOG.md) | **Update** — user-facing changes |
+| [`CHANGELOG.md`](./CHANGELOG.md) | **Update** — user-facing changes (TDD-exempt; include in the PR) |
 | [`README.md`](./README.md) | Plugin features, install, full action list |
 | [`ROADMAP.md`](./ROADMAP.md) | Planned actions, priority tiers, shipped-version status |
 | [`.github/UI-DESIGN-GUIDE.md`](./.github/UI-DESIGN-GUIDE.md) | **Any** key display / SVG / color / marquee / PI / icon change (hardware-tested) |
