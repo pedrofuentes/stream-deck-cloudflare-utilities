@@ -17,12 +17,14 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 
 import { CloudflareD1Api } from "../services/cloudflare-d1-api";
+import { resolveAccountSelection } from "../services/account-selection";
 import { formatCompactNumber, RateLimitError } from "../services/cloudflare-ai-gateway-api";
 import { formatBytes } from "../services/cloudflare-zone-analytics-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE2_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
+import { PerKeyHandlerRegistry } from "../services/per-key-handler-registry";
 import type {
   D1MetricSettings,
   D1MetricType,
@@ -85,13 +87,21 @@ export function formatMetricValue(
 
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.d1-database-metric" })
 export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
+  private readonly keyHandlers: PerKeyHandlerRegistry<D1DatabaseMetric> | null;
   private apiClient: CloudflareD1Api | null = null;
+
+  constructor(isKeyHandler = false) {
+    super();
+    this.keyHandlers = isKeyHandler
+      ? null
+      : new PerKeyHandlerRegistry(() => new D1DatabaseMetric(true));
+  }
   private fetchGeneration = 0;
   private lastMetrics: D1Metrics | null = null;
   private lastDbId: string | null = null;
   private lastDbName: string | null = null;
   private displayMetric: D1MetricType = "reads";
-  private lastDataSettings: { databaseId?: string; timeRange?: string } = {};
+  private lastDataSettings: { accountId?: string; databaseId?: string; timeRange?: string } = {};
   private pendingKeyCycle = false;
   private lastEvent: WillAppearEvent<D1MetricSettings> | DidReceiveSettingsEvent<D1MetricSettings> | null = null;
   private unsubscribeGlobal: (() => void) | null = null;
@@ -103,6 +113,11 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
   private skipUntil = 0;
 
   override async onWillAppear(ev: WillAppearEvent<D1MetricSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onWillAppear(ev);
+      return;
+    }
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
     this.subscribeToCoordinator();
@@ -110,11 +125,12 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) { await ev.action.setImage(renderSetupImage()); return; }
+    if (!this.hasCredentials(global, settings)) { await ev.action.setImage(renderSetupImage()); return; }
     if (!this.hasRequiredSettings(settings, global)) { await ev.action.setImage(renderPlaceholderImage()); return; }
 
-    this.apiClient = new CloudflareD1Api(global.apiToken!, global.accountId!);
-    this.lastDataSettings = { databaseId: settings.databaseId, timeRange: settings.timeRange };
+    const accountId = this.getAccountId(settings, global)!;
+    this.apiClient = new CloudflareD1Api(global.apiToken!, accountId);
+    this.lastDataSettings = { accountId, databaseId: settings.databaseId, timeRange: settings.timeRange };
     this.displayMetric = settings.metric ?? "reads";
     this.marquee.setText(settings.databaseName ?? settings.databaseId ?? "");
 
@@ -129,14 +145,19 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
   }
 
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<D1MetricSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onDidReceiveSettings(ev);
+      return;
+    }
     this.lastEvent = ev;
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) { this.apiClient = null; this.lastMetrics = null; this.lastDbId = null; this.lastDbName = null; this.lastDataSettings = {}; await ev.action.setImage(renderSetupImage()); return; }
+    if (!this.hasCredentials(global, settings)) { this.apiClient = null; this.lastMetrics = null; this.lastDbId = null; this.lastDbName = null; this.lastDataSettings = {}; await ev.action.setImage(renderSetupImage()); return; }
     if (!this.hasRequiredSettings(settings, global)) { this.apiClient = null; this.lastMetrics = null; this.lastDbId = null; this.lastDbName = null; this.lastDataSettings = {}; await ev.action.setImage(renderPlaceholderImage()); return; }
 
-    const dataChanged = settings.databaseId !== this.lastDataSettings.databaseId || settings.timeRange !== this.lastDataSettings.timeRange;
+    const dataChanged = this.getAccountId(settings, global) !== this.lastDataSettings.accountId || settings.databaseId !== this.lastDataSettings.databaseId || settings.timeRange !== this.lastDataSettings.timeRange;
 
     if (this.pendingKeyCycle) { this.pendingKeyCycle = false; return; }
 
@@ -149,11 +170,12 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
     }
 
     this.stopMarqueeTimer();
-    this.apiClient = new CloudflareD1Api(global.apiToken!, global.accountId!);
+    const accountId = this.getAccountId(settings, global)!;
+    this.apiClient = new CloudflareD1Api(global.apiToken!, accountId);
     this.lastMetrics = null;
     this.lastDbId = null;
     this.lastDbName = null;
-    this.lastDataSettings = { databaseId: settings.databaseId, timeRange: settings.timeRange };
+    this.lastDataSettings = { accountId, databaseId: settings.databaseId, timeRange: settings.timeRange };
     this.marquee.setText(settings.databaseName ?? settings.databaseId ?? "");
 
     await ev.action.setImage(renderKeyImage({
@@ -166,7 +188,12 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
     await this.updateMetrics(ev);
   }
 
-  override onWillDisappear(_ev: WillDisappearEvent<D1MetricSettings>): void {
+  override onWillDisappear(ev: WillDisappearEvent<D1MetricSettings>): void {
+    const keyHandler = this.keyHandlers?.take(ev.action.id);
+    if (keyHandler) {
+      keyHandler.onWillDisappear(ev);
+      return;
+    }
     if (this.unsubscribeCoordinator) { this.unsubscribeCoordinator(); this.unsubscribeCoordinator = null; }
     this.stopMarqueeTimer();
     this.apiClient = null;
@@ -184,6 +211,11 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
   }
 
   override async onKeyDown(ev: KeyDownEvent<D1MetricSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onKeyDown(ev);
+      return;
+    }
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
     if (!this.hasRequiredSettings(settings, global)) return;
@@ -254,19 +286,23 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
     return renderKeyImage({ line1: name, line2: truncateForDisplay(value, LINE2_MAX_CHARS), line3: truncateForDisplay(label, LINE3_MAX_CHARS), statusColor: color });
   }
 
-  public hasCredentials(global?: { apiToken?: string; accountId?: string }): boolean {
+  public hasCredentials(global?: { apiToken?: string; accountId?: string }, settings?: D1MetricSettings): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId);
+    return !!(g.apiToken && (settings?.accountId || g.accountId));
   }
 
   public hasRequiredSettings(settings: D1MetricSettings, global?: { apiToken?: string; accountId?: string }): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId && settings.databaseId);
+    return !!(g.apiToken && this.getAccountId(settings, g) && settings.databaseId);
+  }
+
+  private getAccountId(settings: D1MetricSettings, global: { accountId?: string }): string | undefined {
+    return resolveAccountSelection(settings, global.accountId, !!settings.databaseId)?.accountId;
   }
 
   private subscribeToCoordinator(): void {
     if (this.unsubscribeCoordinator) return;
-    this.unsubscribeCoordinator = getPollingCoordinator().subscribe("d1-database-metric", () => this.onCoordinatorTick());
+    this.unsubscribeCoordinator = getPollingCoordinator().subscribe(`d1-database-metric:${this.lastEvent?.action.id ?? "unknown"}`, () => this.onCoordinatorTick());
   }
 
   private async onCoordinatorTick(): Promise<void> {
@@ -308,9 +344,10 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
       const global = getGlobalSettings();
       this.displayMetric = settings.metric ?? this.displayMetric;
       this.marquee.setText(settings.databaseName ?? settings.databaseId ?? "");
-      if (!this.hasCredentials(global)) { await ev.action.setImage(renderSetupImage()); return; }
+      if (!this.hasCredentials(global, settings)) { await ev.action.setImage(renderSetupImage()); return; }
       if (!this.hasRequiredSettings(settings, global)) { await ev.action.setImage(renderPlaceholderImage()); return; }
-      this.apiClient = new CloudflareD1Api(global.apiToken!, global.accountId!);
+      const accountId = this.getAccountId(settings, global)!;
+      this.apiClient = new CloudflareD1Api(global.apiToken!, accountId);
       await this.updateMetrics(ev);
     });
   }

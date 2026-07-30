@@ -23,10 +23,12 @@ import {
   formatCost,
   RateLimitError,
 } from "../services/cloudflare-ai-gateway-api";
+import { resolveAccountSelection } from "../services/account-selection";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE2_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
+import { PerKeyHandlerRegistry } from "../services/per-key-handler-registry";
 import type {
   AiGatewayMetricSettings,
   AiGatewayMetricType,
@@ -109,7 +111,15 @@ export function formatMetricValue(metric: AiGatewayMetricType, metrics: AiGatewa
  */
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.ai-gateway-metric" })
 export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
+  private readonly keyHandlers: PerKeyHandlerRegistry<AiGatewayMetric> | null;
   private apiClient: CloudflareAiGatewayApi | null = null;
+
+  constructor(isKeyHandler = false) {
+    super();
+    this.keyHandlers = isKeyHandler
+      ? null
+      : new PerKeyHandlerRegistry(() => new AiGatewayMetric(true));
+  }
 
   /**
    * Fetch generation counter. Incremented before every fetch so stale
@@ -130,7 +140,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   private displayMetric: AiGatewayMetricType = "requests";
 
   /** Tracks data-affecting settings so metric-only changes skip refetch. */
-  private lastDataSettings: { gatewayId?: string; timeRange?: string } = {};
+  private lastDataSettings: { accountId?: string; gatewayId?: string; timeRange?: string } = {};
 
   /**
    * Set to `true` by onKeyDown before calling setSettings().
@@ -167,6 +177,11 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
    * Called when the action appears on the Stream Deck.
    */
   override async onWillAppear(ev: WillAppearEvent<AiGatewayMetricSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onWillAppear(ev);
+      return;
+    }
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
     this.subscribeToCoordinator();
@@ -174,7 +189,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       await ev.action.setImage(renderSetupImage());
       return;
     }
@@ -184,8 +199,9 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       return;
     }
 
-    this.apiClient = new CloudflareAiGatewayApi(global.apiToken!, global.accountId!);
-    this.lastDataSettings = { gatewayId: settings.gatewayId, timeRange: settings.timeRange };
+    const accountId = this.getAccountId(settings, global)!;
+    this.apiClient = new CloudflareAiGatewayApi(global.apiToken!, accountId);
+    this.lastDataSettings = { accountId, gatewayId: settings.gatewayId, timeRange: settings.timeRange };
     this.displayMetric = settings.metric ?? "requests";
     const displayLabel = settings.gatewayName ?? settings.gatewayId ?? "";
     this.marquee.setText(displayLabel);
@@ -212,12 +228,17 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
    * cycles metrics via key presses.
    */
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<AiGatewayMetricSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onDidReceiveSettings(ev);
+      return;
+    }
     this.lastEvent = ev;
 
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       this.apiClient = null;
       this.lastMetrics = null;
       this.lastGatewayId = null;
@@ -238,6 +259,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     }
 
     const dataChanged =
+      this.getAccountId(settings, global) !== this.lastDataSettings.accountId ||
       settings.gatewayId !== this.lastDataSettings.gatewayId ||
       settings.timeRange !== this.lastDataSettings.timeRange;
 
@@ -262,11 +284,12 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
 
     // Data-affecting settings changed — full reset and refetch
     this.stopMarqueeTimer();
-    this.apiClient = new CloudflareAiGatewayApi(global.apiToken!, global.accountId!);
+    const accountId = this.getAccountId(settings, global)!;
+    this.apiClient = new CloudflareAiGatewayApi(global.apiToken!, accountId);
     this.lastMetrics = null;
     this.lastGatewayId = null;
     this.lastGatewayName = null;
-    this.lastDataSettings = { gatewayId: settings.gatewayId, timeRange: settings.timeRange };
+    this.lastDataSettings = { accountId, gatewayId: settings.gatewayId, timeRange: settings.timeRange };
     const displayLabel2 = settings.gatewayName ?? settings.gatewayId ?? "";
     this.marquee.setText(displayLabel2);
 
@@ -286,7 +309,12 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   /**
    * Called when the action disappears from the Stream Deck.
    */
-  override onWillDisappear(_ev: WillDisappearEvent<AiGatewayMetricSettings>): void {
+  override onWillDisappear(ev: WillDisappearEvent<AiGatewayMetricSettings>): void {
+    const keyHandler = this.keyHandlers?.take(ev.action.id);
+    if (keyHandler) {
+      keyHandler.onWillDisappear(ev);
+      return;
+    }
     if (this.unsubscribeCoordinator) {
       this.unsubscribeCoordinator();
       this.unsubscribeCoordinator = null;
@@ -314,6 +342,11 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
    * using cached data (no API call on press — metrics refresh on interval).
    */
   override async onKeyDown(ev: KeyDownEvent<AiGatewayMetricSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onKeyDown(ev);
+      return;
+    }
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
@@ -458,9 +491,12 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   /**
    * Checks whether API credentials (apiToken + accountId) are present.
    */
-  public hasCredentials(global?: { apiToken?: string; accountId?: string }): boolean {
+  public hasCredentials(
+    global?: { apiToken?: string; accountId?: string },
+    settings?: AiGatewayMetricSettings,
+  ): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId);
+    return !!(g.apiToken && (settings?.accountId || g.accountId));
   }
 
   /**
@@ -468,7 +504,18 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
    */
   public hasRequiredSettings(settings: AiGatewayMetricSettings, global?: { apiToken?: string; accountId?: string }): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId && settings.gatewayId);
+    return !!(g.apiToken && this.getAccountId(settings, g) && settings.gatewayId);
+  }
+
+  private getAccountId(
+    settings: AiGatewayMetricSettings,
+    global: { accountId?: string },
+  ): string | undefined {
+    return resolveAccountSelection(
+      settings,
+      global.accountId,
+      !!settings.gatewayId,
+    )?.accountId;
   }
 
   /**
@@ -478,7 +525,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   private subscribeToCoordinator(): void {
     if (this.unsubscribeCoordinator) return;
     this.unsubscribeCoordinator = getPollingCoordinator().subscribe(
-      "ai-gateway-metric",
+      `ai-gateway-metric:${this.lastEvent?.action.id ?? "unknown"}`,
       () => this.onCoordinatorTick(),
     );
   }
@@ -559,7 +606,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       this.displayMetric = settings.metric ?? this.displayMetric;
       this.marquee.setText(settings.gatewayName ?? settings.gatewayId ?? "");
 
-      if (!this.hasCredentials(global)) {
+      if (!this.hasCredentials(global, settings)) {
         await ev.action.setImage(renderSetupImage());
         return;
       }
@@ -569,7 +616,8 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
         return;
       }
 
-      this.apiClient = new CloudflareAiGatewayApi(global.apiToken!, global.accountId!);
+      const accountId = this.getAccountId(settings, global)!;
+      this.apiClient = new CloudflareAiGatewayApi(global.apiToken!, accountId);
 
       await this.updateMetrics(ev);
     });

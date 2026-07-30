@@ -17,12 +17,14 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 
 import { CloudflareR2Api } from "../services/cloudflare-r2-api";
+import { resolveAccountSelection } from "../services/account-selection";
 import { formatCompactNumber, RateLimitError } from "../services/cloudflare-ai-gateway-api";
 import { formatBytes } from "../services/cloudflare-zone-analytics-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE2_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
+import { PerKeyHandlerRegistry } from "../services/per-key-handler-registry";
 import type {
   R2MetricSettings,
   R2MetricType,
@@ -81,12 +83,20 @@ export function formatMetricValue(
 
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.r2-storage-metric" })
 export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
+  private readonly keyHandlers: PerKeyHandlerRegistry<R2StorageMetric> | null;
   private apiClient: CloudflareR2Api | null = null;
+
+  constructor(isKeyHandler = false) {
+    super();
+    this.keyHandlers = isKeyHandler
+      ? null
+      : new PerKeyHandlerRegistry(() => new R2StorageMetric(true));
+  }
   private fetchGeneration = 0;
   private lastMetrics: R2Metrics | null = null;
   private lastBucketName: string | null = null;
   private displayMetric: R2MetricType = "objects";
-  private lastDataSettings: { bucketName?: string; timeRange?: string } = {};
+  private lastDataSettings: { accountId?: string; bucketName?: string; timeRange?: string } = {};
   private pendingKeyCycle = false;
   private lastEvent: WillAppearEvent<R2MetricSettings> | DidReceiveSettingsEvent<R2MetricSettings> | null = null;
   private unsubscribeGlobal: (() => void) | null = null;
@@ -98,6 +108,11 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
   private skipUntil = 0;
 
   override async onWillAppear(ev: WillAppearEvent<R2MetricSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onWillAppear(ev);
+      return;
+    }
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
     this.subscribeToCoordinator();
@@ -105,7 +120,7 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       await ev.action.setImage(renderSetupImage());
       return;
     }
@@ -115,8 +130,9 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
       return;
     }
 
-    this.apiClient = new CloudflareR2Api(global.apiToken!, global.accountId!);
-    this.lastDataSettings = { bucketName: settings.bucketName, timeRange: settings.timeRange };
+    const accountId = this.getAccountId(settings, global)!;
+    this.apiClient = new CloudflareR2Api(global.apiToken!, accountId);
+    this.lastDataSettings = { accountId, bucketName: settings.bucketName, timeRange: settings.timeRange };
     this.displayMetric = settings.metric ?? "objects";
     this.marquee.setText(settings.bucketName ?? "");
 
@@ -133,12 +149,17 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
   }
 
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<R2MetricSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onDidReceiveSettings(ev);
+      return;
+    }
     this.lastEvent = ev;
 
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       this.apiClient = null;
       this.lastMetrics = null;
       this.lastBucketName = null;
@@ -157,6 +178,7 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
     }
 
     const dataChanged =
+      this.getAccountId(settings, global) !== this.lastDataSettings.accountId ||
       settings.bucketName !== this.lastDataSettings.bucketName ||
       settings.timeRange !== this.lastDataSettings.timeRange;
 
@@ -176,10 +198,11 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
     }
 
     this.stopMarqueeTimer();
-    this.apiClient = new CloudflareR2Api(global.apiToken!, global.accountId!);
+    const accountId = this.getAccountId(settings, global)!;
+    this.apiClient = new CloudflareR2Api(global.apiToken!, accountId);
     this.lastMetrics = null;
     this.lastBucketName = null;
-    this.lastDataSettings = { bucketName: settings.bucketName, timeRange: settings.timeRange };
+    this.lastDataSettings = { accountId, bucketName: settings.bucketName, timeRange: settings.timeRange };
     this.marquee.setText(settings.bucketName ?? "");
 
     await ev.action.setImage(
@@ -194,7 +217,12 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
     await this.updateMetrics(ev);
   }
 
-  override onWillDisappear(_ev: WillDisappearEvent<R2MetricSettings>): void {
+  override onWillDisappear(ev: WillDisappearEvent<R2MetricSettings>): void {
+    const keyHandler = this.keyHandlers?.take(ev.action.id);
+    if (keyHandler) {
+      keyHandler.onWillDisappear(ev);
+      return;
+    }
     if (this.unsubscribeCoordinator) {
       this.unsubscribeCoordinator();
       this.unsubscribeCoordinator = null;
@@ -217,6 +245,11 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
   }
 
   override async onKeyDown(ev: KeyDownEvent<R2MetricSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onKeyDown(ev);
+      return;
+    }
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
@@ -293,19 +326,23 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
     return renderKeyImage({ line1: name, line2: truncateForDisplay(value, LINE2_MAX_CHARS), line3: truncateForDisplay(label, LINE3_MAX_CHARS), statusColor: color });
   }
 
-  public hasCredentials(global?: { apiToken?: string; accountId?: string }): boolean {
+  public hasCredentials(global?: { apiToken?: string; accountId?: string }, settings?: R2MetricSettings): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId);
+    return !!(g.apiToken && (settings?.accountId || g.accountId));
   }
 
   public hasRequiredSettings(settings: R2MetricSettings, global?: { apiToken?: string; accountId?: string }): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId && settings.bucketName);
+    return !!(g.apiToken && this.getAccountId(settings, g) && settings.bucketName);
+  }
+
+  private getAccountId(settings: R2MetricSettings, global: { accountId?: string }): string | undefined {
+    return resolveAccountSelection(settings, global.accountId, !!settings.bucketName)?.accountId;
   }
 
   private subscribeToCoordinator(): void {
     if (this.unsubscribeCoordinator) return;
-    this.unsubscribeCoordinator = getPollingCoordinator().subscribe("r2-storage-metric", () => this.onCoordinatorTick());
+    this.unsubscribeCoordinator = getPollingCoordinator().subscribe(`r2-storage-metric:${this.lastEvent?.action.id ?? "unknown"}`, () => this.onCoordinatorTick());
   }
 
   private async onCoordinatorTick(): Promise<void> {
@@ -353,9 +390,10 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
       const global = getGlobalSettings();
       this.displayMetric = settings.metric ?? this.displayMetric;
       this.marquee.setText(settings.bucketName ?? "");
-      if (!this.hasCredentials(global)) { await ev.action.setImage(renderSetupImage()); return; }
+      if (!this.hasCredentials(global, settings)) { await ev.action.setImage(renderSetupImage()); return; }
       if (!this.hasRequiredSettings(settings, global)) { await ev.action.setImage(renderPlaceholderImage()); return; }
-      this.apiClient = new CloudflareR2Api(global.apiToken!, global.accountId!);
+      const accountId = this.getAccountId(settings, global)!;
+      this.apiClient = new CloudflareR2Api(global.apiToken!, accountId);
       await this.updateMetrics(ev);
     });
   }

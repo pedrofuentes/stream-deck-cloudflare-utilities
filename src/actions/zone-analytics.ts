@@ -21,11 +21,13 @@ import {
   CloudflareZoneAnalyticsApi,
   formatBytes,
 } from "../services/cloudflare-zone-analytics-api";
+import { resolveAccountSelection } from "../services/account-selection";
 import { formatCompactNumber } from "../services/cloudflare-ai-gateway-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE2_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
+import { PerKeyHandlerRegistry } from "../services/per-key-handler-registry";
 import { RateLimitError } from "../services/cloudflare-ai-gateway-api";
 import type {
   ZoneAnalyticsSettings,
@@ -97,13 +99,21 @@ export function formatMetricValue(
  */
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.zone-analytics" })
 export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
+  private readonly keyHandlers: PerKeyHandlerRegistry<ZoneAnalytics> | null;
   private apiClient: CloudflareZoneAnalyticsApi | null = null;
+
+  constructor(isKeyHandler = false) {
+    super();
+    this.keyHandlers = isKeyHandler
+      ? null
+      : new PerKeyHandlerRegistry(() => new ZoneAnalytics(true));
+  }
   private fetchGeneration = 0;
   private lastMetrics: ZoneAnalyticsMetrics | null = null;
   private lastZoneId: string | null = null;
   private lastZoneName: string | null = null;
   private displayMetric: ZoneAnalyticsMetricType = "requests";
-  private lastDataSettings: { zoneId?: string; timeRange?: string } = {};
+  private lastDataSettings: { accountId?: string; zoneId?: string; timeRange?: string } = {};
   private pendingKeyCycle = false;
   private lastEvent: WillAppearEvent<ZoneAnalyticsSettings> | DidReceiveSettingsEvent<ZoneAnalyticsSettings> | null = null;
   private unsubscribeGlobal: (() => void) | null = null;
@@ -115,6 +125,11 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
   private skipUntil = 0;
 
   override async onWillAppear(ev: WillAppearEvent<ZoneAnalyticsSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onWillAppear(ev);
+      return;
+    }
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
     this.subscribeToCoordinator();
@@ -122,7 +137,7 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       await ev.action.setImage(renderSetupImage());
       return;
     }
@@ -133,7 +148,7 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
     }
 
     this.apiClient = new CloudflareZoneAnalyticsApi(global.apiToken!);
-    this.lastDataSettings = { zoneId: settings.zoneId, timeRange: settings.timeRange };
+    this.lastDataSettings = { accountId: this.getAccountId(settings, global), zoneId: settings.zoneId, timeRange: settings.timeRange };
     this.displayMetric = settings.metric ?? "requests";
     this.marquee.setText(settings.zoneName ?? settings.zoneId ?? "");
 
@@ -150,12 +165,17 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
   }
 
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<ZoneAnalyticsSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onDidReceiveSettings(ev);
+      return;
+    }
     this.lastEvent = ev;
 
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       this.apiClient = null;
       this.lastMetrics = null;
       this.lastZoneId = null;
@@ -176,6 +196,7 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
     }
 
     const dataChanged =
+      this.getAccountId(settings, global) !== this.lastDataSettings.accountId ||
       settings.zoneId !== this.lastDataSettings.zoneId ||
       settings.timeRange !== this.lastDataSettings.timeRange;
 
@@ -205,7 +226,7 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
     this.lastMetrics = null;
     this.lastZoneId = null;
     this.lastZoneName = null;
-    this.lastDataSettings = { zoneId: settings.zoneId, timeRange: settings.timeRange };
+    this.lastDataSettings = { accountId: this.getAccountId(settings, global), zoneId: settings.zoneId, timeRange: settings.timeRange };
     this.marquee.setText(settings.zoneName ?? settings.zoneId ?? "");
 
     await ev.action.setImage(
@@ -220,7 +241,12 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
     await this.updateMetrics(ev);
   }
 
-  override onWillDisappear(_ev: WillDisappearEvent<ZoneAnalyticsSettings>): void {
+  override onWillDisappear(ev: WillDisappearEvent<ZoneAnalyticsSettings>): void {
+    const keyHandler = this.keyHandlers?.take(ev.action.id);
+    if (keyHandler) {
+      keyHandler.onWillDisappear(ev);
+      return;
+    }
     if (this.unsubscribeCoordinator) {
       this.unsubscribeCoordinator();
       this.unsubscribeCoordinator = null;
@@ -244,6 +270,11 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
   }
 
   override async onKeyDown(ev: KeyDownEvent<ZoneAnalyticsSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onKeyDown(ev);
+      return;
+    }
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
@@ -365,10 +396,11 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
   }
 
   public hasCredentials(
-    global?: { apiToken?: string; accountId?: string }
+    global?: { apiToken?: string; accountId?: string },
+    settings?: ZoneAnalyticsSettings,
   ): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken);
+    return !!(g.apiToken && (!settings || settings.accountId || g.accountId));
   }
 
   public hasRequiredSettings(
@@ -376,13 +408,17 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
     global?: { apiToken?: string; accountId?: string }
   ): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && settings.zoneId);
+    return !!(g.apiToken && this.getAccountId(settings, g) && settings.zoneId);
+  }
+
+  private getAccountId(settings: ZoneAnalyticsSettings, global: { accountId?: string }): string | undefined {
+    return resolveAccountSelection(settings, global.accountId, !!settings.zoneId)?.accountId;
   }
 
   private subscribeToCoordinator(): void {
     if (this.unsubscribeCoordinator) return;
     this.unsubscribeCoordinator = getPollingCoordinator().subscribe(
-      "zone-analytics",
+      `zone-analytics:${this.lastEvent?.action.id ?? "unknown"}`,
       () => this.onCoordinatorTick(),
     );
   }
@@ -451,7 +487,7 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
       this.displayMetric = settings.metric ?? this.displayMetric;
       this.marquee.setText(settings.zoneName ?? settings.zoneId ?? "");
 
-      if (!this.hasCredentials(global)) {
+      if (!this.hasCredentials(global, settings)) {
         await ev.action.setImage(renderSetupImage());
         return;
       }

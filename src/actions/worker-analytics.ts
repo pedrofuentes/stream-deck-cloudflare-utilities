@@ -21,11 +21,13 @@ import {
   CloudflareWorkerAnalyticsApi,
   formatDuration,
 } from "../services/cloudflare-worker-analytics-api";
+import { resolveAccountSelection } from "../services/account-selection";
 import { formatCompactNumber, RateLimitError } from "../services/cloudflare-ai-gateway-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE2_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
+import { PerKeyHandlerRegistry } from "../services/per-key-handler-registry";
 import { truncateWorkerName } from "../services/cloudflare-workers-api";
 import type {
   WorkerAnalyticsSettings,
@@ -104,7 +106,15 @@ export function formatMetricValue(
  */
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.worker-analytics" })
 export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
+  private readonly keyHandlers: PerKeyHandlerRegistry<WorkerAnalytics> | null;
   private apiClient: CloudflareWorkerAnalyticsApi | null = null;
+
+  constructor(isKeyHandler = false) {
+    super();
+    this.keyHandlers = isKeyHandler
+      ? null
+      : new PerKeyHandlerRegistry(() => new WorkerAnalytics(true));
+  }
 
   /**
    * Fetch generation counter. Incremented before every fetch so stale
@@ -120,7 +130,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
   private displayMetric: WorkerAnalyticsMetricType = "requests";
 
   /** Tracks data-affecting settings so metric-only changes skip refetch. */
-  private lastDataSettings: { workerName?: string; timeRange?: string } = {};
+  private lastDataSettings: { accountId?: string; workerName?: string; timeRange?: string } = {};
 
   /** Flag for key-press cycle — see AI Gateway Metric pattern. */
   private pendingKeyCycle = false;
@@ -155,6 +165,11 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
    * Called when the action appears on the Stream Deck.
    */
   override async onWillAppear(ev: WillAppearEvent<WorkerAnalyticsSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onWillAppear(ev);
+      return;
+    }
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
     this.subscribeToCoordinator();
@@ -162,7 +177,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       await ev.action.setImage(renderSetupImage());
       return;
     }
@@ -172,8 +187,9 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       return;
     }
 
-    this.apiClient = new CloudflareWorkerAnalyticsApi(global.apiToken!, global.accountId!);
-    this.lastDataSettings = { workerName: settings.workerName, timeRange: settings.timeRange };
+    const accountId = this.getAccountId(settings, global)!;
+    this.apiClient = new CloudflareWorkerAnalyticsApi(global.apiToken!, accountId);
+    this.lastDataSettings = { accountId, workerName: settings.workerName, timeRange: settings.timeRange };
     this.displayMetric = settings.metric ?? "requests";
     this.marquee.setText(settings.workerName ?? "");
 
@@ -195,12 +211,17 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
   override async onDidReceiveSettings(
     ev: DidReceiveSettingsEvent<WorkerAnalyticsSettings>
   ): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onDidReceiveSettings(ev);
+      return;
+    }
     this.lastEvent = ev;
 
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       this.apiClient = null;
       this.lastMetrics = null;
       this.lastWorkerName = null;
@@ -219,6 +240,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     }
 
     const dataChanged =
+      this.getAccountId(settings, global) !== this.lastDataSettings.accountId ||
       settings.workerName !== this.lastDataSettings.workerName ||
       settings.timeRange !== this.lastDataSettings.timeRange;
 
@@ -244,10 +266,11 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     }
 
     this.stopMarqueeTimer();
-    this.apiClient = new CloudflareWorkerAnalyticsApi(global.apiToken!, global.accountId!);
+    const accountId = this.getAccountId(settings, global)!;
+    this.apiClient = new CloudflareWorkerAnalyticsApi(global.apiToken!, accountId);
     this.lastMetrics = null;
     this.lastWorkerName = null;
-    this.lastDataSettings = { workerName: settings.workerName, timeRange: settings.timeRange };
+    this.lastDataSettings = { accountId, workerName: settings.workerName, timeRange: settings.timeRange };
     this.marquee.setText(settings.workerName ?? "");
 
     await ev.action.setImage(
@@ -265,7 +288,12 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
   /**
    * Called when the action disappears from the Stream Deck.
    */
-  override onWillDisappear(_ev: WillDisappearEvent<WorkerAnalyticsSettings>): void {
+  override onWillDisappear(ev: WillDisappearEvent<WorkerAnalyticsSettings>): void {
+    const keyHandler = this.keyHandlers?.take(ev.action.id);
+    if (keyHandler) {
+      keyHandler.onWillDisappear(ev);
+      return;
+    }
     if (this.unsubscribeCoordinator) {
       this.unsubscribeCoordinator();
       this.unsubscribeCoordinator = null;
@@ -291,6 +319,11 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
    * Called when the key is pressed. Cycles to the next metric.
    */
   override async onKeyDown(ev: KeyDownEvent<WorkerAnalyticsSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onKeyDown(ev);
+      return;
+    }
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
@@ -429,10 +462,11 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
    * Checks whether API credentials (apiToken + accountId) are present.
    */
   public hasCredentials(
-    global?: { apiToken?: string; accountId?: string }
+    global?: { apiToken?: string; accountId?: string },
+    settings?: WorkerAnalyticsSettings,
   ): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId);
+    return !!(g.apiToken && (settings?.accountId || g.accountId));
   }
 
   /**
@@ -443,7 +477,11 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     global?: { apiToken?: string; accountId?: string }
   ): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId && settings.workerName);
+    return !!(g.apiToken && this.getAccountId(settings, g) && settings.workerName);
+  }
+
+  private getAccountId(settings: WorkerAnalyticsSettings, global: { accountId?: string }): string | undefined {
+    return resolveAccountSelection(settings, global.accountId, !!settings.workerName)?.accountId;
   }
 
   /**
@@ -453,7 +491,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
   private subscribeToCoordinator(): void {
     if (this.unsubscribeCoordinator) return;
     this.unsubscribeCoordinator = getPollingCoordinator().subscribe(
-      "worker-analytics",
+      `worker-analytics:${this.lastEvent?.action.id ?? "unknown"}`,
       () => this.onCoordinatorTick(),
     );
   }
@@ -525,7 +563,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       this.displayMetric = settings.metric ?? this.displayMetric;
       this.marquee.setText(settings.workerName ?? "");
 
-      if (!this.hasCredentials(global)) {
+      if (!this.hasCredentials(global, settings)) {
         await ev.action.setImage(renderSetupImage());
         return;
       }
@@ -537,7 +575,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
 
       this.apiClient = new CloudflareWorkerAnalyticsApi(
         global.apiToken!,
-        global.accountId!
+        this.getAccountId(settings, global)!
       );
 
       await this.updateMetrics(ev);

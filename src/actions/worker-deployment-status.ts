@@ -18,11 +18,13 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 
 import { CloudflareWorkersApi, truncateWorkerName } from "../services/cloudflare-workers-api";
+import { resolveAccountSelection } from "../services/account-selection";
 import { formatTimeAgo } from "../services/key-image-renderer";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
+import { PerKeyHandlerRegistry } from "../services/per-key-handler-registry";
 import type { AccountSelectionSettings } from "../types/account-selection";
 import type { DeploymentStatus } from "../types/cloudflare-workers";
 
@@ -56,7 +58,15 @@ type StatusState = "live" | "gradual" | "recent" | "error";
  */
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.worker-deployment-status" })
 export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSettings> {
+  private readonly keyHandlers: PerKeyHandlerRegistry<WorkerDeploymentStatus> | null;
   private apiClient: CloudflareWorkersApi | null = null;
+
+  constructor(isKeyHandler = false) {
+    super();
+    this.keyHandlers = isKeyHandler
+      ? null
+      : new PerKeyHandlerRegistry(() => new WorkerDeploymentStatus(true));
+  }
   private lastState: StatusState | null = null;
 
   /** Cached data for display-only refreshes (no API call). */
@@ -99,13 +109,18 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    * Validates settings, creates the API client, and starts periodic refresh.
    */
   override async onWillAppear(ev: WillAppearEvent<WorkerDeploymentSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onWillAppear(ev);
+      return;
+    }
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
 
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       await ev.action.setImage(renderSetupImage());
       return;
     }
@@ -115,7 +130,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       return;
     }
 
-    this.apiClient = new CloudflareWorkersApi(global.apiToken!, global.accountId!);
+    this.apiClient = new CloudflareWorkersApi(global.apiToken!, this.getAccountId(settings, global)!);
     this.marquee.setText(settings.workerName ?? "");
 
     // Fetch immediately, then let coordinator handle periodic refresh
@@ -128,6 +143,11 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    * Re-initializes the API client and restarts the refresh cycle.
    */
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<WorkerDeploymentSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onDidReceiveSettings(ev);
+      return;
+    }
     this.lastEvent = ev;
 
     // Tear down existing state
@@ -141,7 +161,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       await ev.action.setImage(renderSetupImage());
       return;
     }
@@ -151,7 +171,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       return;
     }
 
-    this.apiClient = new CloudflareWorkersApi(global.apiToken!, global.accountId!);
+    this.apiClient = new CloudflareWorkersApi(global.apiToken!, this.getAccountId(settings, global)!);
     this.marquee.setText(settings.workerName ?? "");
 
     // Fetch immediately with new settings
@@ -162,7 +182,12 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    * Called when the action disappears from the Stream Deck.
    * Cleans up the refresh interval and API client.
    */
-  override onWillDisappear(_ev: WillDisappearEvent<WorkerDeploymentSettings>): void {
+  override onWillDisappear(ev: WillDisappearEvent<WorkerDeploymentSettings>): void {
+    const keyHandler = this.keyHandlers?.take(ev.action.id);
+    if (keyHandler) {
+      keyHandler.onWillDisappear(ev);
+      return;
+    }
     if (this.unsubscribeCoordinator) {
       this.unsubscribeCoordinator();
       this.unsubscribeCoordinator = null;
@@ -186,6 +211,11 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    * Called when the key is pressed. Triggers an immediate status refresh.
    */
   override async onKeyDown(ev: KeyDownEvent<WorkerDeploymentSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onKeyDown(ev);
+      return;
+    }
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
@@ -195,7 +225,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     }
 
     // Recreate client in case settings changed
-    this.apiClient = new CloudflareWorkersApi(global.apiToken!, global.accountId!);
+    this.apiClient = new CloudflareWorkersApi(global.apiToken!, this.getAccountId(settings, global)!);
     await this.updateStatus(ev);
   }
 
@@ -329,9 +359,12 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   /**
    * Checks whether API credentials (apiToken + accountId) are present.
    */
-  private hasCredentials(global?: { apiToken?: string; accountId?: string }): boolean {
+  private hasCredentials(
+    global?: { apiToken?: string; accountId?: string },
+    settings?: WorkerDeploymentSettings,
+  ): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId);
+    return !!(g.apiToken && (settings?.accountId || g.accountId));
   }
 
   /**
@@ -339,7 +372,11 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
    */
   private hasRequiredSettings(settings: WorkerDeploymentSettings, global?: { apiToken?: string; accountId?: string }): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId && settings.workerName);
+    return !!(g.apiToken && this.getAccountId(settings, g) && settings.workerName);
+  }
+
+  private getAccountId(settings: WorkerDeploymentSettings, global: { accountId?: string }): string | undefined {
+    return resolveAccountSelection(settings, global.accountId, !!settings.workerName)?.accountId;
   }
 
   /**
@@ -349,7 +386,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
     if (this.unsubscribeCoordinator) return;
 
     this.unsubscribeCoordinator = getPollingCoordinator().subscribe(
-      "com.pedrofuentes.cloudflare-utilities.worker-deployment-status",
+      `com.pedrofuentes.cloudflare-utilities.worker-deployment-status:${this.lastEvent?.action.id ?? "unknown"}`,
       async () => {
         if (Date.now() < this.skipUntil) return;
         if (!this.apiClient || !this.lastEvent) return;
@@ -437,7 +474,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       const settings = ev.payload.settings;
       const global = getGlobalSettings();
 
-      if (!this.hasCredentials(global)) {
+      if (!this.hasCredentials(global, settings)) {
         await ev.action.setImage(renderSetupImage());
         return;
       }
@@ -447,7 +484,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
         return;
       }
 
-      this.apiClient = new CloudflareWorkersApi(global.apiToken!, global.accountId!);
+      this.apiClient = new CloudflareWorkersApi(global.apiToken!, this.getAccountId(settings, global)!);
       this.marquee.setText(settings.workerName ?? "");
 
       await this.updateStatus(ev);
