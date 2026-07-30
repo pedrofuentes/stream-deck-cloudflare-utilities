@@ -47,6 +47,7 @@ vi.mock("@elgato/streamdeck", () => ({
 // Track mock methods
 let mockGetMetrics: ReturnType<typeof vi.fn>;
 let mockListGateways: ReturnType<typeof vi.fn>;
+let mockClientAccounts: string[];
 
 // Mock the AI Gateway API service
 vi.mock("../../src/services/cloudflare-ai-gateway-api", async (importOriginal) => {
@@ -54,7 +55,8 @@ vi.mock("../../src/services/cloudflare-ai-gateway-api", async (importOriginal) =
   return {
     ...orig,
     CloudflareAiGatewayApi: class MockCloudflareAiGatewayApi {
-      constructor() {
+      constructor(_apiToken: string, accountId: string) {
+        mockClientAccounts.push(accountId);
         this.getMetrics = mockGetMetrics;
         this.listGateways = mockListGateways;
       }
@@ -66,10 +68,11 @@ vi.mock("../../src/services/cloudflare-ai-gateway-api", async (importOriginal) =
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockEvent(settings: Record<string, unknown> = {}) {
+function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1") {
   return {
     payload: { settings },
     action: {
+      id: actionId,
       setImage: vi.fn().mockResolvedValue(undefined),
       setSettings: vi.fn().mockResolvedValue(undefined),
     },
@@ -240,11 +243,29 @@ describe("AiGatewayMetric", () => {
 
   beforeEach(() => {
     action = new AiGatewayMetric();
+    mockClientAccounts = [];
     mockGetMetrics = vi.fn();
     mockListGateways = vi.fn();
     capturedGlobalListener = null;
     vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token", accountId: "test-account" });
     vi.useFakeTimers();
+  });
+
+  it("should isolate two keys that select different accounts", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+    mockGetMetrics.mockResolvedValue(makeMetrics());
+
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-a" },
+      "key-a",
+    ));
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-b" },
+      "key-b",
+    ));
+
+    expect(mockClientAccounts).toEqual(["account-a", "account-b"]);
+    expect(getPollingCoordinator().subscriberCount).toBe(2);
   });
 
   afterEach(() => {

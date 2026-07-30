@@ -57,10 +57,11 @@ vi.mock("../../src/services/cloudflare-zone-analytics-api", async (importOrigina
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockEvent(settings: Record<string, unknown> = {}) {
+function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1") {
   return {
     payload: { settings },
     action: {
+      id: actionId,
       setImage: vi.fn().mockResolvedValue(undefined),
       setSettings: vi.fn().mockResolvedValue(undefined),
     },
@@ -150,6 +151,33 @@ describe("ZoneAnalytics", () => {
     resetPollingCoordinator();
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("should isolate two keys that select different accounts", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+    mockGetAnalytics.mockResolvedValue(makeMetrics());
+
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-a" },
+      "key-a",
+    ));
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, zoneId: "zone-456", accountId: "account-b" },
+      "key-b",
+    ));
+
+    expect(mockGetAnalytics).toHaveBeenNthCalledWith(1, "zone-123", "24h");
+    expect(mockGetAnalytics).toHaveBeenNthCalledWith(2, "zone-456", "24h");
+    expect(getPollingCoordinator().subscriberCount).toBe(2);
+  });
+
+  it("should require an account for a new Zone Analytics key", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+    const ev = makeMockEvent(VALID_SETTINGS, "new-key");
+
+    await action.onWillAppear(ev);
+
+    expect(mockGetAnalytics).not.toHaveBeenCalled();
   });
 
   describe("hasRequiredSettings", () => {

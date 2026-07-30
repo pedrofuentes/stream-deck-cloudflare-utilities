@@ -30,6 +30,7 @@ vi.mock("@elgato/streamdeck", () => ({
 
 // Track the mock instance methods so tests can configure them
 let mockGetDeploymentStatus: ReturnType<typeof vi.fn>;
+let mockClientAccounts: string[];
 
 // Mock the CloudflareWorkersApi as a class
 vi.mock("../../src/services/cloudflare-workers-api", async (importOriginal) => {
@@ -37,7 +38,8 @@ vi.mock("../../src/services/cloudflare-workers-api", async (importOriginal) => {
   return {
     ...orig,
     CloudflareWorkersApi: class MockCloudflareWorkersApi {
-      constructor() {
+      constructor(_apiToken: string, accountId: string) {
+        mockClientAccounts.push(accountId);
         this.getDeploymentStatus = mockGetDeploymentStatus;
       }
       getDeploymentStatus: ReturnType<typeof vi.fn>;
@@ -52,10 +54,11 @@ vi.mock("../../src/services/global-settings-store", () => ({
 }));
 
 // Helper to create a mock SD event
-function makeMockEvent(settings: Record<string, unknown> = {}) {
+function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1") {
   return {
     payload: { settings },
     action: {
+      id: actionId,
       setImage: vi.fn().mockResolvedValue(undefined),
     },
   } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -72,7 +75,33 @@ describe("WorkerDeploymentStatus", () => {
 
   beforeEach(() => {
     action = new WorkerDeploymentStatus();
+    mockGetDeploymentStatus = vi.fn();
+    mockClientAccounts = [];
     vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "tok", accountId: "acc" });
+  });
+
+  it("should isolate two keys that select different accounts", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "tok" });
+    mockGetDeploymentStatus.mockResolvedValue({
+      isLive: true,
+      isGradual: false,
+      createdOn: "2025-01-15T10:00:00Z",
+      source: "wrangler",
+      versionSplit: "100",
+      deploymentId: "dep-1",
+    });
+
+    await action.onWillAppear(makeMockEvent(
+      { workerName: "worker-a", accountId: "account-a" },
+      "key-a",
+    ));
+    await action.onWillAppear(makeMockEvent(
+      { workerName: "worker-b", accountId: "account-b" },
+      "key-b",
+    ));
+
+    expect(mockClientAccounts).toEqual(["account-a", "account-b"]);
+    expect(getPollingCoordinator().subscriberCount).toBe(2);
   });
 
   // -- resolveState --

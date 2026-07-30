@@ -15,7 +15,7 @@ import {
 } from "../../src/services/cloudflare-pages-api";
 import { STATUS_COLORS, formatTimeAgo } from "../../src/services/key-image-renderer";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../../src/services/global-settings-store";
-import { resetPollingCoordinator } from "../../src/services/polling-coordinator";
+import { getPollingCoordinator, resetPollingCoordinator } from "../../src/services/polling-coordinator";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -39,13 +39,17 @@ vi.mock("@elgato/streamdeck", () => ({
 }));
 
 let mockGetDeploymentStatus: ReturnType<typeof vi.fn>;
+let mockClientAccounts: string[];
 
 vi.mock("../../src/services/cloudflare-pages-api", async (importOriginal) => {
   const orig = await importOriginal<typeof import("../../src/services/cloudflare-pages-api")>();
   return {
     ...orig,
     CloudflarePagesApi: class MockCloudflarePagesApi {
-      constructor() { this.getDeploymentStatus = mockGetDeploymentStatus; }
+      constructor(_apiToken: string, accountId: string) {
+        mockClientAccounts.push(accountId);
+        this.getDeploymentStatus = mockGetDeploymentStatus;
+      }
       getDeploymentStatus: ReturnType<typeof vi.fn>;
     },
   };
@@ -53,10 +57,11 @@ vi.mock("../../src/services/cloudflare-pages-api", async (importOriginal) => {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockEvent(settings: Record<string, unknown> = {}) {
+function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1") {
   return {
     payload: { settings },
     action: {
+      id: actionId,
       setImage: vi.fn().mockResolvedValue(undefined),
       setSettings: vi.fn().mockResolvedValue(undefined),
     },
@@ -117,10 +122,28 @@ describe("PagesDeploymentStatus", () => {
 
   beforeEach(() => {
     action = new PagesDeploymentStatus();
+    mockClientAccounts = [];
     mockGetDeploymentStatus = vi.fn();
     capturedGlobalListener = null;
     vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token", accountId: "test-account" });
     vi.useFakeTimers();
+  });
+
+  it("should isolate two keys that select different accounts", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+    mockGetDeploymentStatus.mockResolvedValue(makeStatus());
+
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-a" },
+      "key-a",
+    ));
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-b" },
+      "key-b",
+    ));
+
+    expect(mockClientAccounts).toEqual(["account-a", "account-b"]);
+    expect(getPollingCoordinator().subscriberCount).toBe(2);
   });
 
   afterEach(() => {

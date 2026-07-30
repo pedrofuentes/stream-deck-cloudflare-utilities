@@ -40,13 +40,17 @@ vi.mock("@elgato/streamdeck", () => ({
 }));
 
 let mockGetMetrics: ReturnType<typeof vi.fn>;
+let mockClientAccounts: string[];
 
 vi.mock("../../src/services/cloudflare-r2-api", async (importOriginal) => {
   const orig = await importOriginal<typeof import("../../src/services/cloudflare-r2-api")>();
   return {
     ...orig,
     CloudflareR2Api: class MockCloudflareR2Api {
-      constructor() { this.getMetrics = mockGetMetrics; }
+      constructor(_apiToken: string, accountId: string) {
+        mockClientAccounts.push(accountId);
+        this.getMetrics = mockGetMetrics;
+      }
       getMetrics: ReturnType<typeof vi.fn>;
     },
   };
@@ -54,10 +58,11 @@ vi.mock("../../src/services/cloudflare-r2-api", async (importOriginal) => {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockEvent(settings: Record<string, unknown> = {}) {
+function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1") {
   return {
     payload: { settings },
     action: {
+      id: actionId,
       setImage: vi.fn().mockResolvedValue(undefined),
       setSettings: vi.fn().mockResolvedValue(undefined),
     },
@@ -131,10 +136,28 @@ describe("R2StorageMetric", () => {
 
   beforeEach(() => {
     action = new R2StorageMetric();
+    mockClientAccounts = [];
     mockGetMetrics = vi.fn();
     capturedGlobalListener = null;
     vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token", accountId: "test-account" });
     vi.useFakeTimers();
+  });
+
+  it("should isolate two keys that select different accounts", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+    mockGetMetrics.mockResolvedValue(makeMetrics());
+
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-a" },
+      "key-a",
+    ));
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-b" },
+      "key-b",
+    ));
+
+    expect(mockClientAccounts).toEqual(["account-a", "account-b"]);
+    expect(getPollingCoordinator().subscriberCount).toBe(2);
   });
 
   afterEach(() => {
