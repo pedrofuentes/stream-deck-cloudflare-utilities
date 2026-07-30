@@ -7,12 +7,13 @@
  * @copyright Pedro Pablo Fuentes Schuster
  * @license MIT
  */
+import type { AccountSelectionSettings } from "./account-selection";
 
 /**
  * Settings for the AI Gateway Metric action (per-button).
- * Auth credentials (apiToken, accountId) are in global settings.
+ * The API token is global; account and resource selection are per key.
  */
-export type AiGatewayMetricSettings = {
+export type AiGatewayMetricSettings = AccountSelectionSettings & {
   /** ID of the AI Gateway to monitor */
   gatewayId?: string;
   /** Display name of the AI Gateway (for key rendering) */

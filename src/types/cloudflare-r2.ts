@@ -7,6 +7,7 @@
  * @copyright Pedro Pablo Fuentes Schuster
  * @license MIT
  */
+import type { AccountSelectionSettings } from "./account-selection";
 
 /**
  * Metric types available for the R2 Storage Metric action.
@@ -41,7 +42,7 @@ export type R2TimeRange = "24h" | "7d" | "30d";
 /**
  * Settings for the R2 Storage Metric action.
  */
-export type R2MetricSettings = {
+export type R2MetricSettings = AccountSelectionSettings & {
   /** R2 bucket name */
   bucketName?: string;
   /** Currently displayed metric */

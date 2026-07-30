@@ -23,13 +23,14 @@ import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-s
 import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
+import type { AccountSelectionSettings } from "../types/account-selection";
 import type { DeploymentStatus } from "../types/cloudflare-workers";
 
 /**
  * Settings for the Worker Deployment Status action (per-button).
- * Auth credentials (apiToken, accountId) are in global settings.
+ * The API token is global; account and Worker selection are per key.
  */
-export type WorkerDeploymentSettings = {
+export type WorkerDeploymentSettings = AccountSelectionSettings & {
   /** Name of the Cloudflare Worker script to monitor */
   workerName?: string;
 };

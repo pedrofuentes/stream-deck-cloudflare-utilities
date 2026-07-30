@@ -5,11 +5,12 @@
  * @copyright Pedro Pablo Fuentes Schuster
  * @license MIT
  */
+import type { AccountSelectionSettings } from "./account-selection";
 
 /**
  * Settings for the DNS Record Monitor action.
  */
-export type DnsRecordSettings = {
+export type DnsRecordSettings = AccountSelectionSettings & {
   /** Zone ID to query */
   zoneId?: string;
   /** Zone name / domain (e.g. "example.com") — saved alongside zoneId */

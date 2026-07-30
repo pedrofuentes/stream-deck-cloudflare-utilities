@@ -7,6 +7,7 @@
  * @copyright Pedro Pablo Fuentes Schuster
  * @license MIT
  */
+import type { AccountSelectionSettings } from "./account-selection";
 
 /**
  * Metric types available for the KV Namespace Metric action.
@@ -39,7 +40,7 @@ export type KvTimeRange = "24h" | "7d" | "30d";
 /**
  * Settings for the KV Namespace Metric action.
  */
-export type KvMetricSettings = {
+export type KvMetricSettings = AccountSelectionSettings & {
   /** KV namespace ID */
   namespaceId?: string;
   /** KV namespace title (for display) */
