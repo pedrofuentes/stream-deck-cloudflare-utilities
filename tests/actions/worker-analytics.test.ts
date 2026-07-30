@@ -221,16 +221,18 @@ describe("WorkerAnalytics", () => {
     it("should set error state after error", async () => {
       mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
-      expect((action as any).isErrorState).toBe(true);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
     });
 
     it("should reset error state after success", async () => {
       mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
       mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
-      (action as any).skipUntil = 0;
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      keyHandler.skipUntil = 0;
       await getPollingCoordinator().tick();
-      expect((action as any).isErrorState).toBe(false);
+      expect(keyHandler.isErrorState).toBe(false);
     });
   });
 
@@ -306,12 +308,12 @@ describe("WorkerAnalytics", () => {
   });
 
   describe("onWillDisappear", () => {
-    it("should clean up without error", () => { expect(() => action.onWillDisappear({} as any)).not.toThrow(); });
+    it("should clean up without error", () => { expect(() => action.onWillDisappear({ action: { id: "key-1" } } as any)).not.toThrow(); });
 
     it("should stop polling", async () => {
       mockGetAnalytics.mockResolvedValue(makeMetrics());
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
-      action.onWillDisappear({} as any);
+      action.onWillDisappear({ action: { id: "key-1" } } as any);
       await vi.advanceTimersByTimeAsync(120_000);
       expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
     });

@@ -239,21 +239,23 @@ describe("D1DatabaseMetric", () => {
       mockGetAnalytics.mockRejectedValueOnce(new Error("API error"));
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
-      expect((action as any).isErrorState).toBe(true);
-      expect((action as any).skipUntil).toBeGreaterThan(Date.now() - 1000);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
+      expect(keyHandler.skipUntil).toBeGreaterThan(Date.now() - 1000);
     });
 
     it("should reset error state after successful fetch", async () => {
       mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
-      expect((action as any).isErrorState).toBe(true);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
 
       mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
-      (action as any).skipUntil = 0;
+      keyHandler.skipUntil = 0;
       await getPollingCoordinator().tick();
-      expect((action as any).isErrorState).toBe(false);
-      expect((action as any).skipUntil).toBe(0);
+      expect(keyHandler.isErrorState).toBe(false);
+      expect(keyHandler.skipUntil).toBe(0);
     });
   });
 
@@ -373,7 +375,7 @@ describe("D1DatabaseMetric", () => {
 
   describe("onWillDisappear", () => {
     it("should clean up without error", () => {
-      expect(() => action.onWillDisappear({} as any)).not.toThrow();
+      expect(() => action.onWillDisappear({ action: { id: "key-1" } } as any)).not.toThrow();
     });
 
     it("should stop polling", async () => {

@@ -419,23 +419,25 @@ describe("AiGatewayMetric", () => {
       await action.onWillAppear(ev);
 
       // The action should be in error state with a future skipUntil
-      expect((action as any).isErrorState).toBe(true);
-      expect((action as any).skipUntil).toBeGreaterThan(Date.now() - 1000);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
+      expect(keyHandler.skipUntil).toBeGreaterThan(Date.now() - 1000);
     });
 
     it("should reset error state after successful fetch", async () => {
       mockGetMetrics.mockRejectedValueOnce(new Error("Fail"));
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
-      expect((action as any).isErrorState).toBe(true);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
 
       // Next coordinator tick succeeds
       mockGetMetrics.mockResolvedValueOnce(makeMetrics());
-      (action as any).skipUntil = 0; // clear backoff for test
+      keyHandler.skipUntil = 0; // clear backoff for test
       await getPollingCoordinator().tick();
 
-      expect((action as any).isErrorState).toBe(false);
-      expect((action as any).skipUntil).toBe(0);
+      expect(keyHandler.isErrorState).toBe(false);
+      expect(keyHandler.skipUntil).toBe(0);
     });
   });
 
@@ -913,8 +915,9 @@ describe("AiGatewayMetric", () => {
 
       // After error, skipUntil should be set to a future timestamp
       // (Date.now() + 2 * intervalMs = 0 + 120_000 with fake timers at t=0)
-      expect((action as any).isErrorState).toBe(true);
-      expect((action as any).skipUntil).toBeGreaterThan(0);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
+      expect(keyHandler.skipUntil).toBeGreaterThan(0);
     });
 
     it("should recover to normal interval after successful fetch", async () => {
@@ -923,16 +926,17 @@ describe("AiGatewayMetric", () => {
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
 
-      expect((action as any).isErrorState).toBe(true);
-      expect((action as any).skipUntil).toBeGreaterThan(0);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
+      expect(keyHandler.skipUntil).toBeGreaterThan(0);
 
       // Next coordinator tick (after backoff clears) succeeds
       mockGetMetrics.mockResolvedValueOnce(makeMetrics());
-      (action as any).skipUntil = 0; // simulate backoff expired
+      keyHandler.skipUntil = 0; // simulate backoff expired
       await getPollingCoordinator().tick();
 
-      expect((action as any).isErrorState).toBe(false);
-      expect((action as any).skipUntil).toBe(0);
+      expect(keyHandler.isErrorState).toBe(false);
+      expect(keyHandler.skipUntil).toBe(0);
     });
 
     it("should keep cached display when refresh fails", async () => {

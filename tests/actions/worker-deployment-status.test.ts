@@ -621,7 +621,8 @@ describe("WorkerDeploymentStatus", () => {
       await action.onWillAppear(ev);
 
       // After error, skipUntil should be set to a future timestamp
-      expect((action as any).skipUntil).toBeGreaterThan(0);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.skipUntil).toBeGreaterThan(0);
     });
 
     it("should clear skipUntil after successful fetch", async () => {
@@ -630,7 +631,8 @@ describe("WorkerDeploymentStatus", () => {
 
       const ev = makeMockEvent({ workerName: "my-api" });
       await action.onWillAppear(ev);
-      expect((action as any).skipUntil).toBeGreaterThan(0);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.skipUntil).toBeGreaterThan(0);
 
       // Next call succeeds
       mockGetDeploymentStatus.mockResolvedValueOnce({
@@ -641,10 +643,10 @@ describe("WorkerDeploymentStatus", () => {
         versionSplit: "100",
         deploymentId: "dep-1",
       });
-      (action as any).skipUntil = 0; // clear for test
+      keyHandler.skipUntil = 0; // clear for test
       await getPollingCoordinator().tick();
 
-      expect((action as any).skipUntil).toBe(0);
+      expect(keyHandler.skipUntil).toBe(0);
     });
   });
 

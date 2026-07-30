@@ -309,12 +309,12 @@ describe("PagesDeploymentStatus", () => {
   // ── onWillDisappear ──────────────────────────────────────────────────
 
   describe("onWillDisappear", () => {
-    it("should clean up without error", () => { expect(() => action.onWillDisappear({} as any)).not.toThrow(); });
+    it("should clean up without error", () => { expect(() => action.onWillDisappear({ action: { id: "key-1" } } as any)).not.toThrow(); });
 
     it("should stop polling", async () => {
       mockGetDeploymentStatus.mockResolvedValue(makeStatus());
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
-      action.onWillDisappear({} as any);
+      action.onWillDisappear({ action: { id: "key-1" } } as any);
       await vi.advanceTimersByTimeAsync(120_000);
       expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
     });

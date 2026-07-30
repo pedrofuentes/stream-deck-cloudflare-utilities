@@ -148,7 +148,7 @@ describe("DnsRecordMonitor", () => {
   });
 
   describe("hasRequiredSettings", () => {
-    it("should return true with apiToken, zoneId, and recordName", () => { expect(action.hasRequiredSettings({ zoneId: "z1", recordName: "x.com" }, { apiToken: "t" })).toBe(true); });
+    it("should return true with apiToken, accountId, zoneId, and recordName", () => { expect(action.hasRequiredSettings({ accountId: "a", zoneId: "z1", recordName: "x.com" }, { apiToken: "t" })).toBe(true); });
     it("should return false without zoneId", () => { expect(action.hasRequiredSettings({ recordName: "x.com" }, { apiToken: "t" })).toBe(false); });
     it("should return false without recordName", () => { expect(action.hasRequiredSettings({ zoneId: "z1" }, { apiToken: "t" })).toBe(false); });
     it("should return false without apiToken", () => { expect(action.hasRequiredSettings({ zoneId: "z1", recordName: "x.com" }, {})).toBe(false); });
@@ -245,12 +245,12 @@ describe("DnsRecordMonitor", () => {
   });
 
   describe("onWillDisappear", () => {
-    it("should clean up without error", () => { expect(() => action.onWillDisappear({} as any)).not.toThrow(); });
+    it("should clean up without error", () => { expect(() => action.onWillDisappear({ action: { id: "key-1" } } as any)).not.toThrow(); });
 
     it("should stop polling", async () => {
       mockGetRecordStatus.mockResolvedValue(makeRecord());
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
-      action.onWillDisappear({} as any);
+      action.onWillDisappear({ action: { id: "key-1" } } as any);
       await vi.advanceTimersByTimeAsync(120_000);
       expect(mockGetRecordStatus).toHaveBeenCalledTimes(1);
     });
