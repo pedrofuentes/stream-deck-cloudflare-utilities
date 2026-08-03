@@ -60,6 +60,7 @@ type StatusState = "live" | "gradual" | "recent" | "error";
 export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSettings> {
   private readonly keyHandlers: PerKeyHandlerRegistry<WorkerDeploymentStatus> | null;
   private apiClient: CloudflareWorkersApi | null = null;
+  private fetchGeneration = 0;
 
   constructor(isKeyHandler = false) {
     super();
@@ -148,6 +149,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       await keyHandler.onDidReceiveSettings(ev);
       return;
     }
+    this.fetchGeneration += 1;
     this.lastEvent = ev;
 
     // Tear down existing state
@@ -188,6 +190,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       keyHandler.onWillDisappear(ev);
       return;
     }
+    this.fetchGeneration += 1;
     if (this.unsubscribeCoordinator) {
       this.unsubscribeCoordinator();
       this.unsubscribeCoordinator = null;
@@ -235,6 +238,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
   private async updateStatus(
     ev: WillAppearEvent<WorkerDeploymentSettings> | KeyDownEvent<WorkerDeploymentSettings> | DidReceiveSettingsEvent<WorkerDeploymentSettings>
   ): Promise<void> {
+    const generation = ++this.fetchGeneration;
     const settings = ev.payload.settings;
 
     if (!this.apiClient || !settings.workerName) {
@@ -244,6 +248,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
 
     try {
       const status = await this.apiClient.getDeploymentStatus(settings.workerName);
+      if (this.fetchGeneration !== generation) return;
 
       if (!status) {
         await ev.action.setImage(this.renderStatus("error", settings.workerName, "No deploys"));
@@ -260,6 +265,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
       this.startMarqueeIfNeeded();
       this.startDisplayRefresh();
     } catch (error) {
+      if (this.fetchGeneration !== generation) return;
       this.lastState = "error";
       this.lastStatus = null;
       this.skipUntil = Date.now() + WorkerDeploymentStatus.ERROR_BACKOFF_MS;

@@ -49,6 +49,7 @@ type StatusState = "success" | "building" | "failed" | "error";
 export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettings> {
   private readonly keyHandlers: PerKeyHandlerRegistry<PagesDeploymentStatus> | null;
   private apiClient: CloudflarePagesApi | null = null;
+  private fetchGeneration = 0;
 
   constructor(isKeyHandler = false) {
     super();
@@ -105,6 +106,7 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
       await keyHandler.onDidReceiveSettings(ev);
       return;
     }
+    this.fetchGeneration += 1;
     this.lastEvent = ev;
 
     this.clearDisplayInterval();
@@ -139,6 +141,7 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
       keyHandler.onWillDisappear(ev);
       return;
     }
+    this.fetchGeneration += 1;
     if (this.unsubscribeCoordinator) {
       this.unsubscribeCoordinator();
       this.unsubscribeCoordinator = null;
@@ -178,6 +181,7 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
   private async updateStatus(
     ev: WillAppearEvent<PagesDeploymentSettings> | KeyDownEvent<PagesDeploymentSettings> | DidReceiveSettingsEvent<PagesDeploymentSettings>
   ): Promise<void> {
+    const generation = ++this.fetchGeneration;
     const settings = ev.payload.settings;
 
     if (!this.apiClient || !settings.projectName) {
@@ -187,6 +191,7 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
 
     try {
       const status = await this.apiClient.getDeploymentStatus(settings.projectName);
+      if (this.fetchGeneration !== generation) return;
 
       if (!status) {
         await ev.action.setImage(this.renderStatus("error", settings.projectName, "No deploys"));
@@ -203,6 +208,7 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
       this.startMarqueeIfNeeded();
       this.startDisplayRefresh();
     } catch (error) {
+      if (this.fetchGeneration !== generation) return;
       this.lastState = "error";
       this.lastStatus = null;
       this.skipUntil = Date.now() + PagesDeploymentStatus.ERROR_BACKOFF_MS;

@@ -154,6 +154,7 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
       await keyHandler.onDidReceiveSettings(ev);
       return;
     }
+    this.fetchGeneration += 1;
     this.lastEvent = ev;
 
     const settings = ev.payload.settings;
@@ -223,6 +224,7 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
       keyHandler.onWillDisappear(ev);
       return;
     }
+    this.fetchGeneration += 1;
     if (this.unsubscribeCoordinator) {
       this.unsubscribeCoordinator();
       this.unsubscribeCoordinator = null;

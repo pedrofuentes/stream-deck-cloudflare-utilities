@@ -150,6 +150,7 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
       await keyHandler.onDidReceiveSettings(ev);
       return;
     }
+    this.fetchGeneration += 1;
     this.lastEvent = ev;
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
@@ -194,6 +195,7 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
       keyHandler.onWillDisappear(ev);
       return;
     }
+    this.fetchGeneration += 1;
     if (this.unsubscribeCoordinator) { this.unsubscribeCoordinator(); this.unsubscribeCoordinator = null; }
     this.stopMarqueeTimer();
     this.apiClient = null;

@@ -233,6 +233,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       await keyHandler.onDidReceiveSettings(ev);
       return;
     }
+    this.fetchGeneration += 1;
     this.lastEvent = ev;
 
     const settings = ev.payload.settings;
@@ -315,6 +316,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       keyHandler.onWillDisappear(ev);
       return;
     }
+    this.fetchGeneration += 1;
     if (this.unsubscribeCoordinator) {
       this.unsubscribeCoordinator();
       this.unsubscribeCoordinator = null;

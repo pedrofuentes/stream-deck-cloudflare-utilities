@@ -41,6 +41,7 @@ import type { DnsRecordSettings } from "../types/cloudflare-dns";
 export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
   private readonly keyHandlers: PerKeyHandlerRegistry<DnsRecordMonitor> | null;
   private apiClient: CloudflareDnsApi | null = null;
+  private fetchGeneration = 0;
 
   constructor(isKeyHandler = false) {
     super();
@@ -99,6 +100,7 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
       await keyHandler.onDidReceiveSettings(ev);
       return;
     }
+    this.fetchGeneration += 1;
     this.lastEvent = ev;
 
     this.stopMarqueeTimer();
@@ -130,6 +132,7 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
       keyHandler.onWillDisappear(ev);
       return;
     }
+    this.fetchGeneration += 1;
     if (this.unsubscribeCoordinator) {
       this.unsubscribeCoordinator();
       this.unsubscribeCoordinator = null;
@@ -166,6 +169,7 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
   private async updateRecord(
     ev: WillAppearEvent<DnsRecordSettings> | KeyDownEvent<DnsRecordSettings> | DidReceiveSettingsEvent<DnsRecordSettings>
   ): Promise<void> {
+    const generation = ++this.fetchGeneration;
     const settings = ev.payload.settings;
 
     if (!this.apiClient || !settings.zoneId || !settings.recordName) {
@@ -180,6 +184,7 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
         settings.recordType,
         settings.zoneName
       );
+      if (this.fetchGeneration !== generation) return;
 
       this.lastRecord = record;
       this.isErrorState = false;
@@ -196,6 +201,7 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
       await ev.action.setImage(this.renderRecord(record));
       this.startMarqueeIfNeeded();
     } catch (error) {
+      if (this.fetchGeneration !== generation) return;
       this.isErrorState = true;
       this.skipUntil = Date.now() + DnsRecordMonitor.ERROR_BACKOFF_MS;
 
