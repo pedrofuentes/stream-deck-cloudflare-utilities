@@ -560,21 +560,12 @@ describe("WorkerDeploymentStatus", () => {
     it("should not render a stale deployment after the key account changes", async () => {
       vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "tok" });
       let resolveOldFetch!: (status: DeploymentStatus) => void;
-      mockGetDeploymentStatus
-        .mockImplementationOnce(
-          () =>
-            new Promise<DeploymentStatus>((resolve) => {
-              resolveOldFetch = resolve;
-            }),
-        )
-        .mockResolvedValueOnce({
-          isLive: true,
-          isGradual: false,
-          createdOn: "2025-01-15T10:00:00Z",
-          source: "new-account",
-          versionSplit: "100",
-          deploymentId: "new-deployment",
-        });
+      mockGetDeploymentStatus.mockImplementationOnce(
+        () =>
+          new Promise<DeploymentStatus>((resolve) => {
+            resolveOldFetch = resolve;
+          }),
+      );
 
       const oldEvent = makeMockEvent({
         workerName: "old-worker",
@@ -584,7 +575,6 @@ describe("WorkerDeploymentStatus", () => {
       await Promise.resolve();
 
       const newEvent = makeMockEvent({
-        workerName: "new-worker",
         accountId: "account-b",
       });
       await action.onDidReceiveSettings(newEvent);

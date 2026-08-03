@@ -300,14 +300,12 @@ describe("PagesDeploymentStatus", () => {
     it("should not render a stale deployment after the key account changes", async () => {
       vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
       let resolveOldFetch!: (status: PagesDeployStatus) => void;
-      mockGetDeploymentStatus
-        .mockImplementationOnce(
-          () =>
-            new Promise<PagesDeployStatus>((resolve) => {
-              resolveOldFetch = resolve;
-            }),
-        )
-        .mockResolvedValueOnce(makeStatus({ branch: "new-account" }));
+      mockGetDeploymentStatus.mockImplementationOnce(
+        () =>
+          new Promise<PagesDeployStatus>((resolve) => {
+            resolveOldFetch = resolve;
+          }),
+      );
 
       const oldEvent = makeMockEvent({
         projectName: "old-project",
@@ -317,7 +315,6 @@ describe("PagesDeploymentStatus", () => {
       await Promise.resolve();
 
       const newEvent = makeMockEvent({
-        projectName: "new-project",
         accountId: "account-b",
       });
       await action.onDidReceiveSettings(newEvent);

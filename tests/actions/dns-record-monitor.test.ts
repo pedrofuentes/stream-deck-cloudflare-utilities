@@ -246,14 +246,12 @@ describe("DnsRecordMonitor", () => {
     it("should not render a stale record after the key account changes", async () => {
       vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
       let resolveOldFetch!: (record: DnsRecordStatus) => void;
-      mockGetRecordStatus
-        .mockImplementationOnce(
-          () =>
-            new Promise<DnsRecordStatus>((resolve) => {
-              resolveOldFetch = resolve;
-            }),
-        )
-        .mockResolvedValueOnce(makeRecord({ content: "new-account" }));
+      mockGetRecordStatus.mockImplementationOnce(
+        () =>
+          new Promise<DnsRecordStatus>((resolve) => {
+            resolveOldFetch = resolve;
+          }),
+      );
 
       const oldEvent = makeMockEvent({
         ...VALID_SETTINGS,
@@ -263,7 +261,6 @@ describe("DnsRecordMonitor", () => {
       await Promise.resolve();
 
       const newEvent = makeMockEvent({
-        ...VALID_SETTINGS,
         accountId: "account-b",
       });
       await action.onDidReceiveSettings(newEvent);
