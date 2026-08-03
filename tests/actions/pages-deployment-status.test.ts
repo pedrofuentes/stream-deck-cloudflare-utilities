@@ -297,6 +297,38 @@ describe("PagesDeploymentStatus", () => {
       expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(2);
     });
 
+    it("should not render a stale deployment after the key account changes", async () => {
+      vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+      let resolveOldFetch!: (status: PagesDeployStatus) => void;
+      mockGetDeploymentStatus
+        .mockImplementationOnce(
+          () =>
+            new Promise<PagesDeployStatus>((resolve) => {
+              resolveOldFetch = resolve;
+            }),
+        )
+        .mockResolvedValueOnce(makeStatus({ branch: "new-account" }));
+
+      const oldEvent = makeMockEvent({
+        projectName: "old-project",
+        accountId: "account-a",
+      });
+      const oldFetch = action.onWillAppear(oldEvent);
+      await Promise.resolve();
+
+      const newEvent = makeMockEvent({
+        projectName: "new-project",
+        accountId: "account-b",
+      });
+      await action.onDidReceiveSettings(newEvent);
+      oldEvent.action.setImage.mockClear();
+
+      resolveOldFetch(makeStatus({ branch: "old-account" }));
+      await oldFetch;
+
+      expect(oldEvent.action.setImage).not.toHaveBeenCalled();
+    });
+
     it("should show placeholder when projectName removed", async () => {
       mockGetDeploymentStatus.mockResolvedValue(makeStatus());
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));

@@ -242,6 +242,38 @@ describe("DnsRecordMonitor", () => {
       await action.onDidReceiveSettings(makeMockEvent({ ...VALID_SETTINGS, recordType: "CNAME" }));
       expect(mockGetRecordStatus).toHaveBeenCalledTimes(2);
     });
+
+    it("should not render a stale record after the key account changes", async () => {
+      vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+      let resolveOldFetch!: (record: DnsRecordStatus) => void;
+      mockGetRecordStatus
+        .mockImplementationOnce(
+          () =>
+            new Promise<DnsRecordStatus>((resolve) => {
+              resolveOldFetch = resolve;
+            }),
+        )
+        .mockResolvedValueOnce(makeRecord({ content: "new-account" }));
+
+      const oldEvent = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-a",
+      });
+      const oldFetch = action.onWillAppear(oldEvent);
+      await Promise.resolve();
+
+      const newEvent = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-b",
+      });
+      await action.onDidReceiveSettings(newEvent);
+      oldEvent.action.setImage.mockClear();
+
+      resolveOldFetch(makeRecord({ content: "old-account" }));
+      await oldFetch;
+
+      expect(oldEvent.action.setImage).not.toHaveBeenCalled();
+    });
   });
 
   describe("onWillDisappear", () => {
