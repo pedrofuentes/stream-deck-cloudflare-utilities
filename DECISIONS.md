@@ -22,6 +22,26 @@
 
 <!-- Add new decisions below this line, most recent first -->
 
+### ADR-006: Keep authentication global and select Cloudflare account per key
+**Date**: 2026-07-29
+**Status**: Accepted
+**Context**: A Cloudflare API token may grant access to multiple accounts. A single global account
+prevented different Stream Deck keys from monitoring resources in different accounts. In addition,
+the Stream Deck SDK shares each `SingletonAction` instance across its physical keys, so mutable
+account-scoped state on the action instance could leak between keys.
+**Decision**: Keep `apiToken` and `refreshIntervalSeconds` in global settings, but persist
+`accountId` and `accountName` in each action's settings. Resolve a legacy global account only for an
+already-configured key, and persist it locally when that key's Property Inspector opens. Clear the
+dependent resource whenever the key's account changes. Dispatch every authenticated action through
+state isolated by `action.id`, use key-specific polling subscriber IDs and account-aware caches, and
+invalidate in-flight responses when settings change or the key disappears.
+**Alternatives considered**: Keep one global account (fails for multi-account tokens); store the
+token per key (duplicates a secret and complicates rotation); keep mutable state on the shared
+`SingletonAction` (allows cross-key interference).
+**Consequences**: Different keys can safely select different accounts with one token. New keys must
+choose an account. Existing configured keys retain compatibility through migration. Authenticated
+actions must clean up their per-key handler and reject stale asynchronous work.
+
 ### ADR-005: Adopt agents-template (v0.16.0) for the agent workflow
 **Date**: 2026-06-16
 **Status**: Accepted
@@ -38,7 +58,7 @@ check (Method B) — rejected because there is no CI pipeline yet.
 
 ### ADR-004: Share credentials via Stream Deck global settings (pub/sub)
 **Date**: 2026-01
-**Status**: Accepted
+**Status**: Superseded by ADR-006
 **Context**: Multiple actions need the same Cloudflare API Token + Account ID; committing
 secrets or duplicating per-action settings is unsafe and error-prone.
 **Decision**: Store credentials in Stream Deck **global settings**, exposed through an in-memory

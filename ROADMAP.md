@@ -41,7 +41,8 @@ Detailed item specs (what / why / API / effort) follow under [Priority Tiers](#p
 
 ## Current Token & API Surface
 
-**Credentials stored**: API Token + Account ID (global settings, shared across actions)
+**Settings stored**: API Token + refresh interval (global settings, shared across actions);
+Account ID + Account Name (per key, paired with its selected resource)
 
 **Token template**: Users are instructed to use the **"Read all resources"** template when creating their API token. This grants read-only access to all Cloudflare API resources, so every action below is already covered — no token changes needed.
 

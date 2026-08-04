@@ -2,7 +2,7 @@
 
 [![Version](https://img.shields.io/badge/version-1.2.1-blue.svg)](https://github.com/pedrofuentes/stream-deck-cloudflare-utilities/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1081%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-1116%20passing-brightgreen.svg)](#)
 
 A [Stream Deck](https://www.elgato.com/stream-deck) plugin that provides a set of utilities to display real-time information from [Cloudflare](https://www.cloudflare.com/) directly on your Stream Deck keys.
 
@@ -67,18 +67,25 @@ Built with the [Stream Deck SDK](https://docs.elgato.com/streamdeck/sdk/introduc
   - 🟢 **Lists** — List query count
   - Features: configurable time range (24h/7d/30d), metric cycling via key press
 
-All actions display a clear **"Please Setup"** indicator when API credentials are missing, guiding you to configure them via the setup window.
+All authenticated actions display a clear **"Please Setup"** indicator when the shared API token,
+the key's Cloudflare account, or its required resource is missing.
 
 > More actions are planned — see the [Roadmap](#roadmap) section below.
 
-### Initial Setup (API Credentials)
+### Initial Setup
 
-API credentials are shared across all actions that need Cloudflare API access (Worker Deployment Status, AI Gateway Metric, Worker Analytics, Pages Deployment Status, DNS Record Monitor, Zone Analytics, R2 Storage Metric, D1 Database Metric, KV Namespace Metric).
+The API token and refresh interval are shared across authenticated actions. The Cloudflare account
+is selected separately for each Stream Deck key, so one token can power keys from different
+accounts.
 
-1. Add any Cloudflare action to your Stream Deck.
-2. In the Property Inspector, click **Setup** to open the credentials window.
-3. Enter your **API Token** and **Account ID**.
-4. Click **Save** — all actions using Cloudflare API will automatically pick up the credentials.
+1. Add any authenticated Cloudflare action to your Stream Deck.
+2. In the Property Inspector, open **Cloudflare Plugin Settings** and enter your **API Token**.
+3. Back in the key's Property Inspector, select the **Account** for that key.
+4. Select the Worker, project, zone, bucket, database, namespace, or gateway to monitor.
+
+Changing a key's account clears its dependent resource selection to prevent a resource from one
+account being queried under another. Existing configured keys migrate their former global account
+selection when their Property Inspector is opened.
 
 #### Creating an API Token
 
@@ -93,7 +100,7 @@ API credentials are shared across all actions that need Cloudflare API access (W
    - **Account → Workers R2 Storage → Read** (for R2 Storage Metric)
    - **Zone → DNS → Read** (for DNS Record Monitor)
    - **Zone → Analytics → Read** (for Zone Analytics)
-4. Save and paste the token into the setup window.
+4. Save and paste the token into **Cloudflare Plugin Settings**.
 
 ### Setting Up Worker Deployment Status
 
@@ -278,7 +285,7 @@ The output is a `.streamDeckPlugin` file ready for distribution.
 │   │   ├── actions/             # Action-specific icons (SVG)
 │   │   └── plugin/              # Plugin-level icons (PNG)
 │   ├── ui/                      # Property Inspector HTML files
-│   │   ├── setup.html           # Shared credentials setup window
+│   │   ├── setup.html           # Shared token and refresh settings window
 │   │   └── *.html               # Per-action property inspectors
 │   ├── manifest.json            # Plugin manifest
 │   └── .sdignore                # Files to exclude from packaging

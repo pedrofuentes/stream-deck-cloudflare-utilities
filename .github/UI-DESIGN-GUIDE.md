@@ -447,19 +447,27 @@ Provides consistent Elgato-styled UI components. [Component reference & live dem
 | **Hide unused sections** | If one PI serves multiple actions, hide irrelevant sections on load to prevent flicker. |
 | **No large paragraphs** | Space is limited in the PI panel. |
 
-### Global Settings Pattern
+### Shared Authentication and Per-Key Account Pattern
 
-API credentials are shared across all actions via Stream Deck's global settings — not per-action settings.
+The API token and refresh interval are shared through Stream Deck global settings. The Cloudflare
+account is selected and stored per action key.
 
 ```
-setup.html → $SD.setGlobalSettings({ apiToken, accountId })
+setup.html → $SD.setGlobalSettings({ apiToken, refreshIntervalSeconds })
                 ↓
 plugin.ts → onDidReceiveGlobalSettings → globalSettingsStore.update()
                 ↓
-actions → subscribe via onGlobalSettingsChanged() → re-initialize API clients
+account-selector.js → $SD.setSettings({ accountId, accountName, ...resourceCleared })
+                ↓
+actions → resolve key account → initialize isolated API client and polling state
 ```
 
-**Never store `apiToken` or `accountId` in per-action settings.** Always use `getGlobalSettings()`.
+Use the shared `account-selector.js` and `FilterableSelect` for every authenticated action.
+Changing the account must clear the dependent resource ID and display name. A legacy global
+account may migrate an already-configured key, but must not preselect a new blank key.
+
+**Never store `apiToken` in per-action settings. Never use the global account for new
+configuration.**
 
 ### FilterableSelect — Searchable Dropdown Component
 

@@ -11,7 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Cloudflare accounts are selected per Stream Deck key; the shared plugin settings now contain
+  only the API token and refresh interval.
+- Existing configured keys migrate their legacy global account selection when opened.
+
 ### Fixed
+
+- Tokens with access to multiple Cloudflare accounts can now power keys configured for different
+  accounts.
+- Authenticated actions isolate runtime state, polling subscriptions, and account-scoped caches by
+  key, and discard responses started before an account change.
 
 ### Removed
 
