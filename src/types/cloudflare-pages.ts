@@ -5,11 +5,12 @@
  * @copyright Pedro Pablo Fuentes Schuster
  * @license MIT
  */
+import type { AccountSelectionSettings } from "./account-selection";
 
 /**
  * Settings for the Pages Deployment Status action.
  */
-export type PagesDeploymentSettings = {
+export type PagesDeploymentSettings = AccountSelectionSettings & {
   /** Name of the Cloudflare Pages project to monitor */
   projectName?: string;
 };

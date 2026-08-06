@@ -21,10 +21,12 @@ import {
   truncateDomainName,
   type DnsRecordStatus,
 } from "../services/cloudflare-dns-api";
+import { resolveAccountSelection } from "../services/account-selection";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE2_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
+import { PerKeyHandlerRegistry } from "../services/per-key-handler-registry";
 import type { DnsRecordSettings } from "../types/cloudflare-dns";
 
 /**
@@ -37,7 +39,16 @@ import type { DnsRecordSettings } from "../types/cloudflare-dns";
  */
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.dns-record-monitor" })
 export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
+  private readonly keyHandlers: PerKeyHandlerRegistry<DnsRecordMonitor> | null;
   private apiClient: CloudflareDnsApi | null = null;
+  private fetchGeneration = 0;
+
+  constructor(isKeyHandler = false) {
+    super();
+    this.keyHandlers = isKeyHandler
+      ? null
+      : new PerKeyHandlerRegistry(() => new DnsRecordMonitor(true));
+  }
   private lastRecord: DnsRecordStatus | null = null;
   private lastEvent: WillAppearEvent<DnsRecordSettings> | DidReceiveSettingsEvent<DnsRecordSettings> | null = null;
   private unsubscribeGlobal: (() => void) | null = null;
@@ -55,6 +66,11 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
   private isErrorState = false;
 
   override async onWillAppear(ev: WillAppearEvent<DnsRecordSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onWillAppear(ev);
+      return;
+    }
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
     this.subscribeToCoordinator();
@@ -62,7 +78,7 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       await ev.action.setImage(renderSetupImage());
       return;
     }
@@ -79,6 +95,12 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
   }
 
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<DnsRecordSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onDidReceiveSettings(ev);
+      return;
+    }
+    this.fetchGeneration += 1;
     this.lastEvent = ev;
 
     this.stopMarqueeTimer();
@@ -88,7 +110,7 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       await ev.action.setImage(renderSetupImage());
       return;
     }
@@ -104,7 +126,13 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
     await this.updateRecord(ev);
   }
 
-  override onWillDisappear(_ev: WillDisappearEvent<DnsRecordSettings>): void {
+  override onWillDisappear(ev: WillDisappearEvent<DnsRecordSettings>): void {
+    const keyHandler = this.keyHandlers?.take(ev.action.id);
+    if (keyHandler) {
+      keyHandler.onWillDisappear(ev);
+      return;
+    }
+    this.fetchGeneration += 1;
     if (this.unsubscribeCoordinator) {
       this.unsubscribeCoordinator();
       this.unsubscribeCoordinator = null;
@@ -122,6 +150,11 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
   }
 
   override async onKeyDown(ev: KeyDownEvent<DnsRecordSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onKeyDown(ev);
+      return;
+    }
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
@@ -136,6 +169,7 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
   private async updateRecord(
     ev: WillAppearEvent<DnsRecordSettings> | KeyDownEvent<DnsRecordSettings> | DidReceiveSettingsEvent<DnsRecordSettings>
   ): Promise<void> {
+    const generation = ++this.fetchGeneration;
     const settings = ev.payload.settings;
 
     if (!this.apiClient || !settings.zoneId || !settings.recordName) {
@@ -150,6 +184,7 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
         settings.recordType,
         settings.zoneName
       );
+      if (this.fetchGeneration !== generation) return;
 
       this.lastRecord = record;
       this.isErrorState = false;
@@ -166,6 +201,7 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
       await ev.action.setImage(this.renderRecord(record));
       this.startMarqueeIfNeeded();
     } catch (error) {
+      if (this.fetchGeneration !== generation) return;
       this.isErrorState = true;
       this.skipUntil = Date.now() + DnsRecordMonitor.ERROR_BACKOFF_MS;
 
@@ -226,10 +262,11 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
   }
 
   public hasCredentials(
-    global?: { apiToken?: string; accountId?: string }
+    global?: { apiToken?: string; accountId?: string },
+    settings?: DnsRecordSettings,
   ): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken);
+    return !!(g.apiToken && (!settings || settings.accountId || g.accountId));
   }
 
   public hasRequiredSettings(
@@ -237,13 +274,21 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
     global?: { apiToken?: string; accountId?: string }
   ): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && settings.zoneId && settings.recordName);
+    return !!(g.apiToken && this.getAccountId(settings, g) && settings.zoneId && settings.recordName);
+  }
+
+  private getAccountId(settings: DnsRecordSettings, global: { accountId?: string }): string | undefined {
+    return resolveAccountSelection(
+      settings,
+      global.accountId,
+      !!(settings.zoneId && settings.recordName),
+    )?.accountId;
   }
 
   private subscribeToCoordinator(): void {
     if (this.unsubscribeCoordinator) return;
     this.unsubscribeCoordinator = getPollingCoordinator().subscribe(
-      "dns-record-monitor",
+      `dns-record-monitor:${this.lastEvent?.action.id ?? "unknown"}`,
       () => this.onCoordinatorTick(),
     );
   }
@@ -294,6 +339,7 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
 
     this.unsubscribeGlobal = onGlobalSettingsChanged(async () => {
       if (!this.lastEvent) return;
+      this.fetchGeneration += 1;
 
       this.stopMarqueeTimer();
       this.apiClient = null;
@@ -305,7 +351,7 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
 
       this.marqueeName.setText(settings.recordName ?? "");
 
-      if (!this.hasCredentials(global)) {
+      if (!this.hasCredentials(global, settings)) {
         await ev.action.setImage(renderSetupImage());
         return;
       }

@@ -1,8 +1,9 @@
 /**
- * Global settings store for Cloudflare account credentials.
+ * Global settings store for shared Cloudflare authentication and polling.
  *
- * Shared across all actions — API token and Account ID are entered once
- * and used by every Cloudflare action on the Stream Deck.
+ * The API token and refresh interval are shared across all actions.
+ * Account selection belongs to each key; the old global Account ID remains
+ * temporarily readable for migration.
  *
  * Plugin.ts keeps this store in sync with Stream Deck's global settings.
  * Actions read from it whenever they need credentials.
@@ -18,7 +19,7 @@
 export type GlobalSettings = {
   /** Cloudflare API Bearer token */
   apiToken?: string;
-  /** Cloudflare Account ID (32-char hex) */
+  /** @deprecated Legacy Account ID used only to migrate configured keys */
   accountId?: string;
   /** Shared refresh interval in seconds (30, 60, 120, 300, 600) */
   refreshIntervalSeconds?: number;

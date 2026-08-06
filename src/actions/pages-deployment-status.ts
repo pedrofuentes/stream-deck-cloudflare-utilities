@@ -23,10 +23,12 @@ import {
   truncateProjectName,
   type PagesDeploymentStatus as PagesDeployStatus,
 } from "../services/cloudflare-pages-api";
+import { resolveAccountSelection } from "../services/account-selection";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay, formatTimeAgo } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
+import { PerKeyHandlerRegistry } from "../services/per-key-handler-registry";
 import type { PagesDeploymentSettings } from "../types/cloudflare-pages";
 
 /**
@@ -45,7 +47,16 @@ type StatusState = "success" | "building" | "failed" | "error";
  */
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.pages-deployment-status" })
 export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettings> {
+  private readonly keyHandlers: PerKeyHandlerRegistry<PagesDeploymentStatus> | null;
   private apiClient: CloudflarePagesApi | null = null;
+  private fetchGeneration = 0;
+
+  constructor(isKeyHandler = false) {
+    super();
+    this.keyHandlers = isKeyHandler
+      ? null
+      : new PerKeyHandlerRegistry(() => new PagesDeploymentStatus(true));
+  }
   private lastState: StatusState | null = null;
   private lastStatus: PagesDeployStatus | null = null;
   private lastProjectName: string | null = null;
@@ -61,13 +72,18 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
   private marqueeInterval: ReturnType<typeof setInterval> | null = null;
 
   override async onWillAppear(ev: WillAppearEvent<PagesDeploymentSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onWillAppear(ev);
+      return;
+    }
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
 
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       await ev.action.setImage(renderSetupImage());
       return;
     }
@@ -77,7 +93,7 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
       return;
     }
 
-    this.apiClient = new CloudflarePagesApi(global.apiToken!, global.accountId!);
+    this.apiClient = new CloudflarePagesApi(global.apiToken!, this.getAccountId(settings, global)!);
     this.marquee.setText(settings.projectName ?? "");
 
     await this.updateStatus(ev);
@@ -85,6 +101,12 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
   }
 
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<PagesDeploymentSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onDidReceiveSettings(ev);
+      return;
+    }
+    this.fetchGeneration += 1;
     this.lastEvent = ev;
 
     this.clearDisplayInterval();
@@ -97,7 +119,7 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) {
+    if (!this.hasCredentials(global, settings)) {
       await ev.action.setImage(renderSetupImage());
       return;
     }
@@ -107,13 +129,19 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
       return;
     }
 
-    this.apiClient = new CloudflarePagesApi(global.apiToken!, global.accountId!);
+    this.apiClient = new CloudflarePagesApi(global.apiToken!, this.getAccountId(settings, global)!);
     this.marquee.setText(settings.projectName ?? "");
 
     await this.updateStatus(ev);
   }
 
-  override onWillDisappear(_ev: WillDisappearEvent<PagesDeploymentSettings>): void {
+  override onWillDisappear(ev: WillDisappearEvent<PagesDeploymentSettings>): void {
+    const keyHandler = this.keyHandlers?.take(ev.action.id);
+    if (keyHandler) {
+      keyHandler.onWillDisappear(ev);
+      return;
+    }
+    this.fetchGeneration += 1;
     if (this.unsubscribeCoordinator) {
       this.unsubscribeCoordinator();
       this.unsubscribeCoordinator = null;
@@ -134,6 +162,11 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
   }
 
   override async onKeyDown(ev: KeyDownEvent<PagesDeploymentSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onKeyDown(ev);
+      return;
+    }
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
@@ -141,13 +174,14 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
       return;
     }
 
-    this.apiClient = new CloudflarePagesApi(global.apiToken!, global.accountId!);
+    this.apiClient = new CloudflarePagesApi(global.apiToken!, this.getAccountId(settings, global)!);
     await this.updateStatus(ev);
   }
 
   private async updateStatus(
     ev: WillAppearEvent<PagesDeploymentSettings> | KeyDownEvent<PagesDeploymentSettings> | DidReceiveSettingsEvent<PagesDeploymentSettings>
   ): Promise<void> {
+    const generation = ++this.fetchGeneration;
     const settings = ev.payload.settings;
 
     if (!this.apiClient || !settings.projectName) {
@@ -157,6 +191,7 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
 
     try {
       const status = await this.apiClient.getDeploymentStatus(settings.projectName);
+      if (this.fetchGeneration !== generation) return;
 
       if (!status) {
         await ev.action.setImage(this.renderStatus("error", settings.projectName, "No deploys"));
@@ -173,6 +208,7 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
       this.startMarqueeIfNeeded();
       this.startDisplayRefresh();
     } catch (error) {
+      if (this.fetchGeneration !== generation) return;
       this.lastState = "error";
       this.lastStatus = null;
       this.skipUntil = Date.now() + PagesDeploymentStatus.ERROR_BACKOFF_MS;
@@ -246,10 +282,11 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
   }
 
   public hasCredentials(
-    global?: { apiToken?: string; accountId?: string }
+    global?: { apiToken?: string; accountId?: string },
+    settings?: PagesDeploymentSettings,
   ): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId);
+    return !!(g.apiToken && (settings?.accountId || g.accountId));
   }
 
   public hasRequiredSettings(
@@ -257,13 +294,17 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
     global?: { apiToken?: string; accountId?: string }
   ): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId && settings.projectName);
+    return !!(g.apiToken && this.getAccountId(settings, g) && settings.projectName);
+  }
+
+  private getAccountId(settings: PagesDeploymentSettings, global: { accountId?: string }): string | undefined {
+    return resolveAccountSelection(settings, global.accountId, !!settings.projectName)?.accountId;
   }
 
   private subscribeToCoordinator(): void {
     if (this.unsubscribeCoordinator) return;
     this.unsubscribeCoordinator = getPollingCoordinator().subscribe(
-      "pages-deployment-status",
+      `pages-deployment-status:${this.lastEvent?.action.id ?? "unknown"}`,
       () => this.onCoordinatorTick(),
     );
   }
@@ -338,6 +379,7 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
 
     this.unsubscribeGlobal = onGlobalSettingsChanged(async () => {
       if (!this.lastEvent) return;
+      this.fetchGeneration += 1;
 
       this.clearDisplayInterval();
       this.stopMarqueeTimer();
@@ -352,7 +394,7 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
 
       this.marquee.setText(settings.projectName ?? "");
 
-      if (!this.hasCredentials(global)) {
+      if (!this.hasCredentials(global, settings)) {
         await ev.action.setImage(renderSetupImage());
         return;
       }
@@ -362,7 +404,7 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
         return;
       }
 
-      this.apiClient = new CloudflarePagesApi(global.apiToken!, global.accountId!);
+      this.apiClient = new CloudflarePagesApi(global.apiToken!, this.getAccountId(settings, global)!);
       await this.updateStatus(ev);
     });
   }

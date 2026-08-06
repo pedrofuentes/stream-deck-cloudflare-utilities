@@ -7,6 +7,7 @@
  * @copyright Pedro Pablo Fuentes Schuster
  * @license MIT
  */
+import type { AccountSelectionSettings } from "./account-selection";
 
 /**
  * Metric types available for the Zone Analytics action.
@@ -42,7 +43,7 @@ export type ZoneAnalyticsTimeRange = "24h" | "7d" | "30d";
 /**
  * Settings for the Zone Analytics action.
  */
-export type ZoneAnalyticsSettings = {
+export type ZoneAnalyticsSettings = AccountSelectionSettings & {
   /** Zone ID to query */
   zoneId?: string;
   /** Human-readable zone name (saved by the PI) */

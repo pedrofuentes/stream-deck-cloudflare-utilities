@@ -38,7 +38,8 @@ stream-deck-cloudflare-utilities/
 
 Shared cross-action services: `key-image-renderer` (SVG → key image), `marquee-controller`
 (scrolling long names), `polling-coordinator` (adaptive polling), `global-settings-store`
-(credentials pub/sub).
+(authentication and refresh pub/sub), `account-selection` (per-key account resolution), and
+`per-key-handler-registry` (key-isolated action state).
 
 ### UUID convention
 - Plugin: `com.pedrofuentes.cloudflare-utilities`
@@ -117,27 +118,33 @@ and tracks `lastDisplayName` for cached renders.
 HTTP 429 is handled with graceful backoff via `RateLimitError` in
 `cloudflare-ai-gateway-api.ts`.
 
-## Global Settings Architecture
+## Authentication and Per-Key Account Architecture
 
-API credentials (API Token, Account ID) are shared across all actions through Stream Deck
-global settings — never via `.env` or hard-coding. See ADR-004.
+Authentication is shared, while resource scope belongs to each Stream Deck key. See ADR-006.
 
-1. `src/services/global-settings-store.ts` — in-memory store with pub/sub; actions subscribe
-   via `onGlobalSettingsChanged()`.
-2. `src/plugin.ts` — loads global settings on startup, listens via `onDidReceiveGlobalSettings`.
-3. `plugin/ui/setup.html` — shared setup window opened from any PI; reads/writes via
-   `$SD.getGlobalSettings()` / `$SD.setGlobalSettings()`.
-4. Each action re-initializes when credentials change.
+1. Stream Deck global settings contain `apiToken` and `refreshIntervalSeconds`.
+   `src/services/global-settings-store.ts` publishes changes to authenticated actions.
+2. Each action's settings contain `accountId`, `accountName`, and its account-scoped resource ID and
+   display name. `plugin/ui/account-selector.js` lists every accessible account and persists the
+   selected account on that key.
+3. `src/services/account-selection.ts` accepts a legacy global account only for an
+   already-configured key. New blank keys must choose an account; the Property Inspector persists a
+   migrated account locally when opened.
+4. Every authenticated `SingletonAction` dispatches events through
+   `src/services/per-key-handler-registry.ts`, keyed by `action.id`. Polling subscriber IDs and
+   caches include the key/account scope so one key cannot overwrite another.
+5. Changing an account clears the dependent resource. A generation counter invalidates requests
+   started under earlier settings, preventing a late response from rendering stale account data.
 
-To add a field: update the `GlobalSettings` type, add an input to `setup.html`; actions pick
-it up automatically through the pub/sub system.
+Never store the API token in action settings or source files. Never use the legacy global account
+as the selection for a newly configured key.
 
 ## Key Technical Decisions
 
 Recorded as ADRs in [`../DECISIONS.md`](../DECISIONS.md). Highlights: Statuspage endpoint over
 the branded domain (ADR-001), REST-over-GraphQL when uncertain (ADR-002), `vite` pinned via
 package overrides for the TC39 decorator transform (ADR-003), global-settings pub/sub for
-shared credentials (ADR-004).
+shared authentication (ADR-004), and per-key account and runtime isolation (ADR-006).
 
 ## Key Files
 
@@ -145,9 +152,12 @@ shared credentials (ADR-004).
 |------|---------|
 | `src/plugin.ts` | Registers all actions, connects to Stream Deck |
 | `src/services/key-image-renderer.ts` | SVG → key image (accent bar, line layout, colors, truncation constants) |
-| `src/services/global-settings-store.ts` | Credentials store + pub/sub |
+| `src/services/global-settings-store.ts` | Shared token and refresh settings store + pub/sub |
+| `src/services/account-selection.ts` | Resolves per-key account selection and legacy migration |
+| `src/services/per-key-handler-registry.ts` | Isolates mutable `SingletonAction` state by key |
 | `src/services/polling-coordinator.ts` | Adaptive polling shared across actions |
 | `src/services/marquee-controller.ts` | Scrolling animation for names > 10 chars |
+| `plugin/ui/account-selector.js` | Shared per-key Cloudflare account selector |
 | `plugin/manifest.json` | Plugin + action definitions (UUIDs, states) |
 | `scripts/validate-consistency.ts` | Verifies actions/manifest/PI/icons/tests/docs are in sync |
 

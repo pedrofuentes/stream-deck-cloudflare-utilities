@@ -7,6 +7,7 @@
  * @copyright Pedro Pablo Fuentes Schuster
  * @license MIT
  */
+import type { AccountSelectionSettings } from "./account-selection";
 
 /**
  * Metric types available for the Worker Analytics action.
@@ -46,7 +47,7 @@ export type WorkerAnalyticsTimeRange = "24h" | "7d" | "30d";
 /**
  * Settings for the Worker Analytics action.
  */
-export type WorkerAnalyticsSettings = {
+export type WorkerAnalyticsSettings = AccountSelectionSettings & {
   /** Worker script name */
   workerName?: string;
   /** Currently displayed metric */

@@ -13,6 +13,7 @@ import {
   formatMetricValue,
 } from "../../src/actions/zone-analytics";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
+import { RateLimitError } from "../../src/services/cloudflare-ai-gateway-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../../src/services/global-settings-store";
 import { resetPollingCoordinator, getPollingCoordinator } from "../../src/services/polling-coordinator";
 import type {
@@ -57,11 +58,13 @@ vi.mock("../../src/services/cloudflare-zone-analytics-api", async (importOrigina
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockEvent(settings: Record<string, unknown> = {}) {
+function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1") {
   return {
     payload: { settings },
     action: {
+      id: actionId,
       setImage: vi.fn().mockResolvedValue(undefined),
+      getSettings: vi.fn().mockResolvedValue(settings),
       setSettings: vi.fn().mockResolvedValue(undefined),
     },
   } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -152,8 +155,35 @@ describe("ZoneAnalytics", () => {
     vi.restoreAllMocks();
   });
 
+  it("should isolate two keys that select different accounts", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+    mockGetAnalytics.mockResolvedValue(makeMetrics());
+
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-a" },
+      "key-a",
+    ));
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, zoneId: "zone-456", accountId: "account-b" },
+      "key-b",
+    ));
+
+    expect(mockGetAnalytics).toHaveBeenNthCalledWith(1, "zone-123", "24h");
+    expect(mockGetAnalytics).toHaveBeenNthCalledWith(2, "zone-456", "24h");
+    expect(getPollingCoordinator().subscriberCount).toBe(2);
+  });
+
+  it("should require an account for a new Zone Analytics key", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+    const ev = makeMockEvent(VALID_SETTINGS, "new-key");
+
+    await action.onWillAppear(ev);
+
+    expect(mockGetAnalytics).not.toHaveBeenCalled();
+  });
+
   describe("hasRequiredSettings", () => {
-    it("should return true with apiToken and zoneId", () => { expect(action.hasRequiredSettings({ zoneId: "z1" }, { apiToken: "t" })).toBe(true); });
+    it("should return true with apiToken, accountId, and zoneId", () => { expect(action.hasRequiredSettings({ accountId: "a", zoneId: "z1" }, { apiToken: "t" })).toBe(true); });
     it("should return false without zoneId", () => { expect(action.hasRequiredSettings({}, { apiToken: "t" })).toBe(false); });
     it("should return false without apiToken", () => { expect(action.hasRequiredSettings({ zoneId: "z1" }, {})).toBe(false); });
   });
@@ -187,16 +217,18 @@ describe("ZoneAnalytics", () => {
     it("should set error state after error", async () => {
       mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
-      expect((action as any).isErrorState).toBe(true);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
     });
 
     it("should reset error state after success", async () => {
       mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
       mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
-      (action as any).skipUntil = 0;
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      keyHandler.skipUntil = 0;
       await getPollingCoordinator().tick();
-      expect((action as any).isErrorState).toBe(false);
+      expect(keyHandler.isErrorState).toBe(false);
     });
   });
 
@@ -254,6 +286,16 @@ describe("ZoneAnalytics", () => {
       expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
     });
 
+    it("should clear cached state when the zone selection is removed", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+
+      const ev = makeMockEvent({ accountId: VALID_SETTINGS.accountId });
+      await action.onDidReceiveSettings(ev);
+
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("...");
+    });
+
     it("should reuse cached metrics on metric-only change", async () => {
       mockGetAnalytics.mockResolvedValue(makeMetrics());
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
@@ -272,12 +314,12 @@ describe("ZoneAnalytics", () => {
   });
 
   describe("onWillDisappear", () => {
-    it("should clean up without error", () => { expect(() => action.onWillDisappear({} as any)).not.toThrow(); });
+    it("should clean up without error", () => { expect(() => action.onWillDisappear({ action: { id: "key-1" } } as any)).not.toThrow(); });
 
     it("should stop polling", async () => {
       mockGetAnalytics.mockResolvedValue(makeMetrics());
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
-      action.onWillDisappear({} as any);
+      action.onWillDisappear({ action: { id: "key-1" } } as any);
       await vi.advanceTimersByTimeAsync(120_000);
       expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
     });
@@ -314,6 +356,22 @@ describe("ZoneAnalytics", () => {
       await action.onDidReceiveSettings(settingsEv);
       expect(settingsEv.action.setImage).not.toHaveBeenCalled();
     });
+
+    it("should not swallow an account change after a key cycle", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onKeyDown(makeMockEvent(VALID_SETTINGS));
+
+      const settingsEv = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-2",
+        metric: "bandwidth",
+      });
+      await action.onDidReceiveSettings(settingsEv);
+
+      expect(settingsEv.action.setImage).toHaveBeenCalled();
+      expect(mockGetAnalytics).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("error back-off", () => {
@@ -322,7 +380,7 @@ describe("ZoneAnalytics", () => {
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
       ev.action.setImage.mockClear();
-      mockGetAnalytics.mockRejectedValueOnce(new Error("Rate limited"));
+      mockGetAnalytics.mockRejectedValueOnce(new RateLimitError("zone", 120));
       await vi.advanceTimersByTimeAsync(60_000);
       expect(ev.action.setImage).not.toHaveBeenCalled();
     });

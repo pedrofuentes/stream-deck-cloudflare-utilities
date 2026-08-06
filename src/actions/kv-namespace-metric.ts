@@ -17,11 +17,13 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 
 import { CloudflareKvApi } from "../services/cloudflare-kv-api";
+import { resolveAccountSelection } from "../services/account-selection";
 import { formatCompactNumber, RateLimitError } from "../services/cloudflare-ai-gateway-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../services/global-settings-store";
 import { renderKeyImage, renderPlaceholderImage, renderSetupImage, STATUS_COLORS, LINE1_MAX_CHARS, LINE2_MAX_CHARS, LINE3_MAX_CHARS, truncateForDisplay } from "../services/key-image-renderer";
 import { MarqueeController } from "../services/marquee-controller";
 import { getPollingCoordinator } from "../services/polling-coordinator";
+import { PerKeyHandlerRegistry } from "../services/per-key-handler-registry";
 import type {
   KvMetricSettings,
   KvMetricType,
@@ -80,13 +82,26 @@ export function formatMetricValue(
 
 @action({ UUID: "com.pedrofuentes.cloudflare-utilities.kv-namespace-metric" })
 export class KvNamespaceMetric extends SingletonAction<KvMetricSettings> {
+  private readonly keyHandlers: PerKeyHandlerRegistry<KvNamespaceMetric> | null;
   private apiClient: CloudflareKvApi | null = null;
+
+  constructor(isKeyHandler = false) {
+    super();
+    this.keyHandlers = isKeyHandler
+      ? null
+      : new PerKeyHandlerRegistry(() => new KvNamespaceMetric(true));
+  }
   private fetchGeneration = 0;
   private lastMetrics: KvMetrics | null = null;
   private lastNamespaceId: string | null = null;
   private displayMetric: KvMetricType = "reads";
-  private lastDataSettings: { namespaceId?: string; timeRange?: string } = {};
-  private pendingKeyCycle = false;
+  private lastDataSettings: { accountId?: string; namespaceId?: string; timeRange?: string } = {};
+  private pendingKeyCycle: {
+    metric: KvMetricType;
+    accountId?: string;
+    namespaceId?: string;
+    timeRange?: string;
+  } | null = null;
   private lastEvent: WillAppearEvent<KvMetricSettings> | DidReceiveSettingsEvent<KvMetricSettings> | null = null;
   private unsubscribeGlobal: (() => void) | null = null;
   private unsubscribeCoordinator: (() => void) | null = null;
@@ -97,6 +112,12 @@ export class KvNamespaceMetric extends SingletonAction<KvMetricSettings> {
   private skipUntil = 0;
 
   override async onWillAppear(ev: WillAppearEvent<KvMetricSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onWillAppear(ev);
+      return;
+    }
+    const generation = ++this.fetchGeneration;
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
     this.subscribeToCoordinator();
@@ -104,11 +125,13 @@ export class KvNamespaceMetric extends SingletonAction<KvMetricSettings> {
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) { await ev.action.setImage(renderSetupImage()); return; }
+    if (!this.hasCredentials(global, settings)) { await ev.action.setImage(renderSetupImage()); return; }
     if (!this.hasRequiredSettings(settings, global)) { await ev.action.setImage(renderPlaceholderImage()); return; }
 
-    this.apiClient = new CloudflareKvApi(global.apiToken!, global.accountId!);
-    this.lastDataSettings = { namespaceId: settings.namespaceId, timeRange: settings.timeRange };
+    const accountId = this.getAccountId(settings, global)!;
+    const apiClient = new CloudflareKvApi(global.apiToken!, accountId);
+    this.apiClient = apiClient;
+    this.lastDataSettings = { accountId, namespaceId: settings.namespaceId, timeRange: settings.timeRange };
     this.displayMetric = settings.metric ?? "reads";
     this.marquee.setText(settings.namespaceName ?? settings.namespaceId ?? "");
 
@@ -118,36 +141,54 @@ export class KvNamespaceMetric extends SingletonAction<KvMetricSettings> {
       line3: KV_METRIC_SHORT_LABELS[this.displayMetric] ?? "",
       statusColor: metricColor(this.displayMetric),
     }));
+    if (this.fetchGeneration !== generation) return;
 
-    await this.updateMetrics(ev);
+    await this.updateMetrics(ev, generation, apiClient);
   }
 
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<KvMetricSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onDidReceiveSettings(ev);
+      return;
+    }
+    const generation = ++this.fetchGeneration;
     this.lastEvent = ev;
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
 
-    if (!this.hasCredentials(global)) { this.apiClient = null; this.lastMetrics = null; this.lastNamespaceId = null; this.lastDataSettings = {}; await ev.action.setImage(renderSetupImage()); return; }
+    if (!this.hasCredentials(global, settings)) { this.apiClient = null; this.lastMetrics = null; this.lastNamespaceId = null; this.lastDataSettings = {}; await ev.action.setImage(renderSetupImage()); return; }
     if (!this.hasRequiredSettings(settings, global)) { this.apiClient = null; this.lastMetrics = null; this.lastNamespaceId = null; this.lastDataSettings = {}; await ev.action.setImage(renderPlaceholderImage()); return; }
 
-    const dataChanged = settings.namespaceId !== this.lastDataSettings.namespaceId || settings.timeRange !== this.lastDataSettings.timeRange;
-
-    if (this.pendingKeyCycle) { this.pendingKeyCycle = false; return; }
+    const dataChanged = this.getAccountId(settings, global) !== this.lastDataSettings.accountId || settings.namespaceId !== this.lastDataSettings.namespaceId || settings.timeRange !== this.lastDataSettings.timeRange;
+    const pendingKeyCycle = this.pendingKeyCycle;
+    this.pendingKeyCycle = null;
+    if (
+      pendingKeyCycle &&
+      !dataChanged &&
+      settings.metric === pendingKeyCycle.metric &&
+      this.getAccountId(settings, global) === pendingKeyCycle.accountId &&
+      settings.namespaceId === pendingKeyCycle.namespaceId &&
+      settings.timeRange === pendingKeyCycle.timeRange
+    ) return;
 
     this.displayMetric = settings.metric ?? "reads";
 
     if (!dataChanged && this.lastMetrics && this.apiClient) {
       this.marquee.setText(settings.namespaceName ?? settings.namespaceId ?? "");
       await ev.action.setImage(this.renderMetric(this.displayMetric, settings.namespaceName ?? settings.namespaceId ?? "", this.lastMetrics, settings.timeRange, this.marquee.getCurrentText()));
+      if (this.fetchGeneration !== generation) return;
       this.startMarqueeIfNeeded();
       return;
     }
 
     this.stopMarqueeTimer();
-    this.apiClient = new CloudflareKvApi(global.apiToken!, global.accountId!);
+    const accountId = this.getAccountId(settings, global)!;
+    const apiClient = new CloudflareKvApi(global.apiToken!, accountId);
+    this.apiClient = apiClient;
     this.lastMetrics = null;
     this.lastNamespaceId = null;
-    this.lastDataSettings = { namespaceId: settings.namespaceId, timeRange: settings.timeRange };
+    this.lastDataSettings = { accountId, namespaceId: settings.namespaceId, timeRange: settings.timeRange };
     this.marquee.setText(settings.namespaceName ?? settings.namespaceId ?? "");
 
     await ev.action.setImage(renderKeyImage({
@@ -156,18 +197,25 @@ export class KvNamespaceMetric extends SingletonAction<KvMetricSettings> {
       line3: KV_METRIC_SHORT_LABELS[this.displayMetric] ?? "",
       statusColor: metricColor(this.displayMetric),
     }));
+    if (this.fetchGeneration !== generation) return;
 
-    await this.updateMetrics(ev);
+    await this.updateMetrics(ev, generation, apiClient);
   }
 
-  override onWillDisappear(_ev: WillDisappearEvent<KvMetricSettings>): void {
+  override onWillDisappear(ev: WillDisappearEvent<KvMetricSettings>): void {
+    const keyHandler = this.keyHandlers?.take(ev.action.id);
+    if (keyHandler) {
+      keyHandler.onWillDisappear(ev);
+      return;
+    }
+    this.fetchGeneration += 1;
     if (this.unsubscribeCoordinator) { this.unsubscribeCoordinator(); this.unsubscribeCoordinator = null; }
     this.stopMarqueeTimer();
     this.apiClient = null;
     this.lastMetrics = null;
     this.lastNamespaceId = null;
     this.lastDataSettings = {};
-    this.pendingKeyCycle = false;
+    this.pendingKeyCycle = null;
     this.displayMetric = "reads";
     this.marquee.setText("");
     this.lastEvent = null;
@@ -177,6 +225,11 @@ export class KvNamespaceMetric extends SingletonAction<KvMetricSettings> {
   }
 
   override async onKeyDown(ev: KeyDownEvent<KvMetricSettings>): Promise<void> {
+    const keyHandler = this.keyHandlers?.get(ev.action.id);
+    if (keyHandler) {
+      await keyHandler.onKeyDown(ev);
+      return;
+    }
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
     if (!this.hasRequiredSettings(settings, global)) return;
@@ -193,23 +246,33 @@ export class KvNamespaceMetric extends SingletonAction<KvMetricSettings> {
       this.startMarqueeIfNeeded();
     }
 
-    this.pendingKeyCycle = true;
-    await ev.action.setSettings({ ...settings, metric: nextMetric });
+    const latestSettings =
+      typeof ev.action.getSettings === "function"
+        ? await ev.action.getSettings<KvMetricSettings>()
+        : settings;
+    this.pendingKeyCycle = {
+      metric: nextMetric,
+      accountId: this.getAccountId(latestSettings, global),
+      namespaceId: latestSettings.namespaceId,
+      timeRange: latestSettings.timeRange,
+    };
+    await ev.action.setSettings({ ...latestSettings, metric: nextMetric });
   }
 
   private async updateMetrics(
-    ev: WillAppearEvent<KvMetricSettings> | KeyDownEvent<KvMetricSettings> | DidReceiveSettingsEvent<KvMetricSettings>
+    ev: WillAppearEvent<KvMetricSettings> | KeyDownEvent<KvMetricSettings> | DidReceiveSettingsEvent<KvMetricSettings>,
+    generation: number,
+    apiClient: CloudflareKvApi,
   ): Promise<void> {
-    const gen = ++this.fetchGeneration;
     const settings = ev.payload.settings;
-    if (!this.apiClient || !settings.namespaceId) { await ev.action.setImage(renderPlaceholderImage()); return; }
+    if (!settings.namespaceId) { await ev.action.setImage(renderPlaceholderImage()); return; }
 
     const timeRange = settings.timeRange ?? "24h";
     const displayName = settings.namespaceName ?? settings.namespaceId;
 
     try {
-      const metrics = await this.apiClient.getAnalytics(settings.namespaceId, timeRange);
-      if (this.fetchGeneration !== gen) return;
+      const metrics = await apiClient.getAnalytics(settings.namespaceId, timeRange);
+      if (this.fetchGeneration !== generation) return;
 
       this.lastMetrics = metrics;
       this.lastNamespaceId = settings.namespaceId;
@@ -219,7 +282,7 @@ export class KvNamespaceMetric extends SingletonAction<KvMetricSettings> {
       await ev.action.setImage(this.renderMetric(this.displayMetric, displayName, metrics, timeRange, this.marquee.getCurrentText()));
       this.startMarqueeIfNeeded();
     } catch (error) {
-      if (this.fetchGeneration !== gen) return;
+      if (this.fetchGeneration !== generation) return;
       this.isErrorState = true;
 
       if (error instanceof RateLimitError && error.retryAfterSeconds > 0) {
@@ -246,25 +309,30 @@ export class KvNamespaceMetric extends SingletonAction<KvMetricSettings> {
     return renderKeyImage({ line1: name, line2: truncateForDisplay(value, LINE2_MAX_CHARS), line3: truncateForDisplay(label, LINE3_MAX_CHARS), statusColor: color });
   }
 
-  public hasCredentials(global?: { apiToken?: string; accountId?: string }): boolean {
+  public hasCredentials(global?: { apiToken?: string; accountId?: string }, settings?: KvMetricSettings): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId);
+    return !!(g.apiToken && (settings?.accountId || g.accountId));
   }
 
   public hasRequiredSettings(settings: KvMetricSettings, global?: { apiToken?: string; accountId?: string }): boolean {
     const g = global ?? getGlobalSettings();
-    return !!(g.apiToken && g.accountId && settings.namespaceId);
+    return !!(g.apiToken && this.getAccountId(settings, g) && settings.namespaceId);
+  }
+
+  private getAccountId(settings: KvMetricSettings, global: { accountId?: string }): string | undefined {
+    return resolveAccountSelection(settings, global.accountId, !!settings.namespaceId)?.accountId;
   }
 
   private subscribeToCoordinator(): void {
     if (this.unsubscribeCoordinator) return;
-    this.unsubscribeCoordinator = getPollingCoordinator().subscribe("kv-namespace-metric", () => this.onCoordinatorTick());
+    this.unsubscribeCoordinator = getPollingCoordinator().subscribe(`kv-namespace-metric:${this.lastEvent?.action.id ?? "unknown"}`, () => this.onCoordinatorTick());
   }
 
   private async onCoordinatorTick(): Promise<void> {
     if (Date.now() < this.skipUntil) return;
     if (!this.apiClient || !this.lastEvent) return;
-    await this.updateMetrics(this.lastEvent);
+    const generation = ++this.fetchGeneration;
+    await this.updateMetrics(this.lastEvent, generation, this.apiClient);
   }
 
   private startMarqueeIfNeeded(): void {
@@ -290,6 +358,7 @@ export class KvNamespaceMetric extends SingletonAction<KvMetricSettings> {
     if (this.unsubscribeGlobal) return;
     this.unsubscribeGlobal = onGlobalSettingsChanged(async () => {
       if (!this.lastEvent) return;
+      const generation = ++this.fetchGeneration;
       this.stopMarqueeTimer();
       this.apiClient = null;
       this.lastMetrics = null;
@@ -300,10 +369,12 @@ export class KvNamespaceMetric extends SingletonAction<KvMetricSettings> {
       const global = getGlobalSettings();
       this.displayMetric = settings.metric ?? this.displayMetric;
       this.marquee.setText(settings.namespaceName ?? settings.namespaceId ?? "");
-      if (!this.hasCredentials(global)) { await ev.action.setImage(renderSetupImage()); return; }
+      if (!this.hasCredentials(global, settings)) { await ev.action.setImage(renderSetupImage()); return; }
       if (!this.hasRequiredSettings(settings, global)) { await ev.action.setImage(renderPlaceholderImage()); return; }
-      this.apiClient = new CloudflareKvApi(global.apiToken!, global.accountId!);
-      await this.updateMetrics(ev);
+      const accountId = this.getAccountId(settings, global)!;
+      const apiClient = new CloudflareKvApi(global.apiToken!, accountId);
+      this.apiClient = apiClient;
+      await this.updateMetrics(ev, generation, apiClient);
     });
   }
 }

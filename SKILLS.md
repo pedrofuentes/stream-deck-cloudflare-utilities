@@ -435,22 +435,28 @@ if (this.marquee.needsAnimation()) {
 
 ---
 
-## 13. Global Settings (Shared Credentials)
+## 13. Split Global and Per-Key Cloudflare Settings
 
-API credentials are stored in Stream Deck's global settings rather than
-per-action settings. This avoids duplicate token entry and enables a single
-setup window shared by all actions.
+The API token and refresh interval live in Stream Deck global settings. The selected Cloudflare
+account (`accountId` and `accountName`) lives in each action's settings so keys can monitor
+different accounts through one multi-account token.
 
 ### Architecture
 
-1. **`global-settings-store.ts`**: In-memory store with pub/sub (`onGlobalSettingsChanged`).
+1. **`global-settings-store.ts`**: In-memory token/refresh store with pub/sub
+   (`onGlobalSettingsChanged`).
 2. **`plugin.ts`**: Loads on startup, listens for updates via `onDidReceiveGlobalSettings`.
-3. **`setup.html`**: Shared UI window opened from any action's Property Inspector.
-4. **Actions**: Subscribe to changes and re-initialize API clients automatically.
+3. **`setup.html`**: Shared token and refresh UI opened from any action's Property Inspector.
+4. **`account-selector.js`**: Lists accessible accounts and persists the selection on the key.
+5. **Actions**: Resolve the key's account and isolate mutable runtime state by `action.id`.
 
-### Key rule
-Never store `apiToken` or `accountId` in per-action settings. Always read from
-`getGlobalSettings()`.
+### Key rules
+
+- Never store `apiToken` in per-action settings.
+- Store both `accountId` and `accountName` with the key's resource selection.
+- Clear the dependent resource when the account changes.
+- Treat a global `accountId` as migration-only for already-configured keys.
+- Use key-specific polling IDs, caches, and stale-request generation guards.
 
 ---
 

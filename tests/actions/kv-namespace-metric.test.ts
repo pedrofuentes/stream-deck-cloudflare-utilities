@@ -13,6 +13,7 @@ import {
   formatMetricValue,
 } from "../../src/actions/kv-namespace-metric";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
+import { RateLimitError } from "../../src/services/cloudflare-ai-gateway-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../../src/services/global-settings-store";
 import { resetPollingCoordinator, getPollingCoordinator } from "../../src/services/polling-coordinator";
 import type { KvMetrics, KvMetricType } from "../../src/types/cloudflare-kv";
@@ -40,13 +41,17 @@ vi.mock("@elgato/streamdeck", () => ({
 }));
 
 let mockGetAnalytics: ReturnType<typeof vi.fn>;
+let mockClientAccounts: string[];
 
 vi.mock("../../src/services/cloudflare-kv-api", async (importOriginal) => {
   const orig = await importOriginal<typeof import("../../src/services/cloudflare-kv-api")>();
   return {
     ...orig,
     CloudflareKvApi: class MockCloudflareKvApi {
-      constructor() { this.getAnalytics = mockGetAnalytics; }
+      constructor(_apiToken: string, accountId: string) {
+        mockClientAccounts.push(accountId);
+        this.getAnalytics = mockGetAnalytics;
+      }
       getAnalytics: ReturnType<typeof vi.fn>;
     },
   };
@@ -54,11 +59,13 @@ vi.mock("../../src/services/cloudflare-kv-api", async (importOriginal) => {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockEvent(settings: Record<string, unknown> = {}) {
+function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1") {
   return {
     payload: { settings },
     action: {
+      id: actionId,
       setImage: vi.fn().mockResolvedValue(undefined),
+      getSettings: vi.fn().mockResolvedValue(settings),
       setSettings: vi.fn().mockResolvedValue(undefined),
     },
   } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -128,10 +135,28 @@ describe("KvNamespaceMetric", () => {
 
   beforeEach(() => {
     action = new KvNamespaceMetric();
+    mockClientAccounts = [];
     mockGetAnalytics = vi.fn();
     capturedGlobalListener = null;
     vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token", accountId: "test-account" });
     vi.useFakeTimers();
+  });
+
+  it("should isolate two keys that select different accounts", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+    mockGetAnalytics.mockResolvedValue(makeMetrics());
+
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-a" },
+      "key-a",
+    ));
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-b" },
+      "key-b",
+    ));
+
+    expect(mockClientAccounts).toEqual(["account-a", "account-b"]);
+    expect(getPollingCoordinator().subscriberCount).toBe(2);
   });
 
   afterEach(() => {
@@ -176,16 +201,18 @@ describe("KvNamespaceMetric", () => {
     it("should set error state after error", async () => {
       mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
-      expect((action as any).isErrorState).toBe(true);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
     });
 
     it("should reset error state after success", async () => {
       mockGetAnalytics.mockRejectedValueOnce(new Error("Fail"));
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
       mockGetAnalytics.mockResolvedValueOnce(makeMetrics());
-      (action as any).skipUntil = 0;
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      keyHandler.skipUntil = 0;
       await getPollingCoordinator().tick();
-      expect((action as any).isErrorState).toBe(false);
+      expect(keyHandler.isErrorState).toBe(false);
     });
   });
 
@@ -261,12 +288,12 @@ describe("KvNamespaceMetric", () => {
   });
 
   describe("onWillDisappear", () => {
-    it("should clean up without error", () => { expect(() => action.onWillDisappear({} as any)).not.toThrow(); });
+    it("should clean up without error", () => { expect(() => action.onWillDisappear({ action: { id: "key-1" } } as any)).not.toThrow(); });
 
     it("should stop polling", async () => {
       mockGetAnalytics.mockResolvedValue(makeMetrics());
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
-      action.onWillDisappear({} as any);
+      action.onWillDisappear({ action: { id: "key-1" } } as any);
       await vi.advanceTimersByTimeAsync(120_000);
       expect(mockGetAnalytics).toHaveBeenCalledTimes(1);
     });
@@ -303,6 +330,22 @@ describe("KvNamespaceMetric", () => {
       await action.onDidReceiveSettings(settingsEv);
       expect(settingsEv.action.setImage).not.toHaveBeenCalled();
     });
+
+    it("should not swallow an account change after a key cycle", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onKeyDown(makeMockEvent(VALID_SETTINGS));
+
+      const settingsEv = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-2",
+        metric: "writes",
+      });
+      await action.onDidReceiveSettings(settingsEv);
+
+      expect(settingsEv.action.setImage).toHaveBeenCalled();
+      expect(mockClientAccounts).toContain("account-2");
+    });
   });
 
   describe("error back-off", () => {
@@ -311,7 +354,7 @@ describe("KvNamespaceMetric", () => {
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
       ev.action.setImage.mockClear();
-      mockGetAnalytics.mockRejectedValueOnce(new Error("Rate limited"));
+      mockGetAnalytics.mockRejectedValueOnce(new RateLimitError("kv", 120));
       await vi.advanceTimersByTimeAsync(60_000);
       expect(ev.action.setImage).not.toHaveBeenCalled();
     });

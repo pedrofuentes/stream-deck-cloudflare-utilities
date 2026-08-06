@@ -19,6 +19,24 @@
 
 <!-- Add new learnings below this line, most recent first -->
 
+### [2026-07-29] SingletonAction state is shared across physical keys
+**Context**: Fixing multi-account tokens so separate keys can select different Cloudflare accounts.
+**Learning**: The SDK creates one `SingletonAction` instance per action type, not per physical key.
+Instance fields, static polling subscriber IDs, account-agnostic caches, and unresolved asynchronous
+requests can therefore overwrite or render another key's state.
+**Impact**: Isolate mutable authenticated-action state by `action.id`; include the key/account in
+polling IDs and caches; clean up on `onWillDisappear`; increment a generation when settings change
+so responses started under an old account are discarded.
+
+### [2026-07-29] Account scope belongs with the selected resource
+**Context**: Migrating from one global Cloudflare Account ID to multi-account key configuration.
+**Learning**: The API token is shared authentication, but the account is part of a key's resource
+scope. A global account cannot represent Workers, zones, buckets, databases, namespaces, projects,
+and gateways selected independently across keys.
+**Impact**: Keep the token and refresh interval global; persist `accountId` and `accountName` per
+key; clear its resource when the account changes. Use a legacy global account only to migrate an
+already-configured key, never to preselect a new key.
+
 ### [2026-06-16] Cloudflare GraphQL dataset/field names are not guessable
 **Context**: Adding analytics actions (Zone, R2, D1, KV).
 **Learning**: Dataset names (e.g., `kvOperationsAdaptiveGroups`, NOT `workersKvStorageAdaptiveGroups`)

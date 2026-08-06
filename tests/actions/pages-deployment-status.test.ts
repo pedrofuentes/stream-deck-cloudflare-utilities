@@ -15,7 +15,7 @@ import {
 } from "../../src/services/cloudflare-pages-api";
 import { STATUS_COLORS, formatTimeAgo } from "../../src/services/key-image-renderer";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../../src/services/global-settings-store";
-import { resetPollingCoordinator } from "../../src/services/polling-coordinator";
+import { getPollingCoordinator, resetPollingCoordinator } from "../../src/services/polling-coordinator";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -39,13 +39,17 @@ vi.mock("@elgato/streamdeck", () => ({
 }));
 
 let mockGetDeploymentStatus: ReturnType<typeof vi.fn>;
+let mockClientAccounts: string[];
 
 vi.mock("../../src/services/cloudflare-pages-api", async (importOriginal) => {
   const orig = await importOriginal<typeof import("../../src/services/cloudflare-pages-api")>();
   return {
     ...orig,
     CloudflarePagesApi: class MockCloudflarePagesApi {
-      constructor() { this.getDeploymentStatus = mockGetDeploymentStatus; }
+      constructor(_apiToken: string, accountId: string) {
+        mockClientAccounts.push(accountId);
+        this.getDeploymentStatus = mockGetDeploymentStatus;
+      }
       getDeploymentStatus: ReturnType<typeof vi.fn>;
     },
   };
@@ -53,10 +57,11 @@ vi.mock("../../src/services/cloudflare-pages-api", async (importOriginal) => {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockEvent(settings: Record<string, unknown> = {}) {
+function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1") {
   return {
     payload: { settings },
     action: {
+      id: actionId,
       setImage: vi.fn().mockResolvedValue(undefined),
       setSettings: vi.fn().mockResolvedValue(undefined),
     },
@@ -117,10 +122,28 @@ describe("PagesDeploymentStatus", () => {
 
   beforeEach(() => {
     action = new PagesDeploymentStatus();
+    mockClientAccounts = [];
     mockGetDeploymentStatus = vi.fn();
     capturedGlobalListener = null;
     vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token", accountId: "test-account" });
     vi.useFakeTimers();
+  });
+
+  it("should isolate two keys that select different accounts", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+    mockGetDeploymentStatus.mockResolvedValue(makeStatus());
+
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-a" },
+      "key-a",
+    ));
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-b" },
+      "key-b",
+    ));
+
+    expect(mockClientAccounts).toEqual(["account-a", "account-b"]);
+    expect(getPollingCoordinator().subscriberCount).toBe(2);
   });
 
   afterEach(() => {
@@ -274,6 +297,35 @@ describe("PagesDeploymentStatus", () => {
       expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(2);
     });
 
+    it("should not render a stale deployment after the key account changes", async () => {
+      vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+      let resolveOldFetch!: (status: PagesDeployStatus) => void;
+      mockGetDeploymentStatus.mockImplementationOnce(
+        () =>
+          new Promise<PagesDeployStatus>((resolve) => {
+            resolveOldFetch = resolve;
+          }),
+      );
+
+      const oldEvent = makeMockEvent({
+        projectName: "old-project",
+        accountId: "account-a",
+      });
+      const oldFetch = action.onWillAppear(oldEvent);
+      await Promise.resolve();
+
+      const newEvent = makeMockEvent({
+        accountId: "account-b",
+      });
+      await action.onDidReceiveSettings(newEvent);
+      oldEvent.action.setImage.mockClear();
+
+      resolveOldFetch(makeStatus({ branch: "old-account" }));
+      await oldFetch;
+
+      expect(oldEvent.action.setImage).not.toHaveBeenCalled();
+    });
+
     it("should show placeholder when projectName removed", async () => {
       mockGetDeploymentStatus.mockResolvedValue(makeStatus());
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
@@ -286,12 +338,12 @@ describe("PagesDeploymentStatus", () => {
   // ── onWillDisappear ──────────────────────────────────────────────────
 
   describe("onWillDisappear", () => {
-    it("should clean up without error", () => { expect(() => action.onWillDisappear({} as any)).not.toThrow(); });
+    it("should clean up without error", () => { expect(() => action.onWillDisappear({ action: { id: "key-1" } } as any)).not.toThrow(); });
 
     it("should stop polling", async () => {
       mockGetDeploymentStatus.mockResolvedValue(makeStatus());
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
-      action.onWillDisappear({} as any);
+      action.onWillDisappear({ action: { id: "key-1" } } as any);
       await vi.advanceTimersByTimeAsync(120_000);
       expect(mockGetDeploymentStatus).toHaveBeenCalledTimes(1);
     });
@@ -411,6 +463,35 @@ describe("PagesDeploymentStatus", () => {
       vi.mocked(getGlobalSettings).mockReturnValue({});
       await capturedGlobalListener!({});
       expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
+    });
+
+    it("should not render an in-flight deployment after credentials are removed", async () => {
+      let resolveFetch!: (status: PagesDeployStatus) => void;
+      mockGetDeploymentStatus.mockImplementationOnce(
+        () =>
+          new Promise<PagesDeployStatus>((resolvePromise) => {
+            resolveFetch = resolvePromise;
+          }),
+      );
+      const ev = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-a",
+      });
+      const pendingFetch = action.onWillAppear(ev);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      vi.mocked(getGlobalSettings).mockReturnValue({});
+      await capturedGlobalListener!({});
+      const callsAfterSetup = ev.action.setImage.mock.calls.length;
+
+      resolveFetch(makeStatus({ branch: "removed-token" }));
+      await pendingFetch;
+
+      expect(ev.action.setImage).toHaveBeenCalledTimes(callsAfterSetup);
+      expect(decodeSvg(ev.action.setImage.mock.calls.at(-1)[0])).toContain(
+        "Please",
+      );
     });
   });
 });

@@ -48,10 +48,11 @@ vi.mock("../../src/services/cloudflare-dns-api", async (importOriginal) => {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockEvent(settings: Record<string, unknown> = {}) {
+function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1") {
   return {
     payload: { settings },
     action: {
+      id: actionId,
       setImage: vi.fn().mockResolvedValue(undefined),
       setSettings: vi.fn().mockResolvedValue(undefined),
     },
@@ -107,8 +108,47 @@ describe("DnsRecordMonitor", () => {
     vi.restoreAllMocks();
   });
 
+  it("should isolate two keys that select different accounts", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+    mockGetRecordStatus.mockResolvedValue(makeRecord());
+
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-a" },
+      "key-a",
+    ));
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, zoneId: "zone-456", accountId: "account-b" },
+      "key-b",
+    ));
+
+    expect(mockGetRecordStatus).toHaveBeenNthCalledWith(
+      1,
+      "zone-123",
+      "example.com",
+      "A",
+      "example.com",
+    );
+    expect(mockGetRecordStatus).toHaveBeenNthCalledWith(
+      2,
+      "zone-456",
+      "example.com",
+      "A",
+      "example.com",
+    );
+    expect(getPollingCoordinator().subscriberCount).toBe(2);
+  });
+
+  it("should require an account for a new DNS key", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+    const ev = makeMockEvent(VALID_SETTINGS, "new-key");
+
+    await action.onWillAppear(ev);
+
+    expect(mockGetRecordStatus).not.toHaveBeenCalled();
+  });
+
   describe("hasRequiredSettings", () => {
-    it("should return true with apiToken, zoneId, and recordName", () => { expect(action.hasRequiredSettings({ zoneId: "z1", recordName: "x.com" }, { apiToken: "t" })).toBe(true); });
+    it("should return true with apiToken, accountId, zoneId, and recordName", () => { expect(action.hasRequiredSettings({ accountId: "a", zoneId: "z1", recordName: "x.com" }, { apiToken: "t" })).toBe(true); });
     it("should return false without zoneId", () => { expect(action.hasRequiredSettings({ recordName: "x.com" }, { apiToken: "t" })).toBe(false); });
     it("should return false without recordName", () => { expect(action.hasRequiredSettings({ zoneId: "z1" }, { apiToken: "t" })).toBe(false); });
     it("should return false without apiToken", () => { expect(action.hasRequiredSettings({ zoneId: "z1", recordName: "x.com" }, {})).toBe(false); });
@@ -202,15 +242,44 @@ describe("DnsRecordMonitor", () => {
       await action.onDidReceiveSettings(makeMockEvent({ ...VALID_SETTINGS, recordType: "CNAME" }));
       expect(mockGetRecordStatus).toHaveBeenCalledTimes(2);
     });
+
+    it("should not render a stale record after the key account changes", async () => {
+      vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+      let resolveOldFetch!: (record: DnsRecordStatus) => void;
+      mockGetRecordStatus.mockImplementationOnce(
+        () =>
+          new Promise<DnsRecordStatus>((resolve) => {
+            resolveOldFetch = resolve;
+          }),
+      );
+
+      const oldEvent = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-a",
+      });
+      const oldFetch = action.onWillAppear(oldEvent);
+      await Promise.resolve();
+
+      const newEvent = makeMockEvent({
+        accountId: "account-b",
+      });
+      await action.onDidReceiveSettings(newEvent);
+      oldEvent.action.setImage.mockClear();
+
+      resolveOldFetch(makeRecord({ content: "old-account" }));
+      await oldFetch;
+
+      expect(oldEvent.action.setImage).not.toHaveBeenCalled();
+    });
   });
 
   describe("onWillDisappear", () => {
-    it("should clean up without error", () => { expect(() => action.onWillDisappear({} as any)).not.toThrow(); });
+    it("should clean up without error", () => { expect(() => action.onWillDisappear({ action: { id: "key-1" } } as any)).not.toThrow(); });
 
     it("should stop polling", async () => {
       mockGetRecordStatus.mockResolvedValue(makeRecord());
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
-      action.onWillDisappear({} as any);
+      action.onWillDisappear({ action: { id: "key-1" } } as any);
       await vi.advanceTimersByTimeAsync(120_000);
       expect(mockGetRecordStatus).toHaveBeenCalledTimes(1);
     });

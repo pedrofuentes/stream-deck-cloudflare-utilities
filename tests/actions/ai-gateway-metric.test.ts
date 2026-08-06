@@ -47,6 +47,7 @@ vi.mock("@elgato/streamdeck", () => ({
 // Track mock methods
 let mockGetMetrics: ReturnType<typeof vi.fn>;
 let mockListGateways: ReturnType<typeof vi.fn>;
+let mockClientAccounts: string[];
 
 // Mock the AI Gateway API service
 vi.mock("../../src/services/cloudflare-ai-gateway-api", async (importOriginal) => {
@@ -54,7 +55,8 @@ vi.mock("../../src/services/cloudflare-ai-gateway-api", async (importOriginal) =
   return {
     ...orig,
     CloudflareAiGatewayApi: class MockCloudflareAiGatewayApi {
-      constructor() {
+      constructor(_apiToken: string, accountId: string) {
+        mockClientAccounts.push(accountId);
         this.getMetrics = mockGetMetrics;
         this.listGateways = mockListGateways;
       }
@@ -66,10 +68,12 @@ vi.mock("../../src/services/cloudflare-ai-gateway-api", async (importOriginal) =
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockEvent(settings: Record<string, unknown> = {}) {
+function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1") {
   return {
     payload: { settings },
     action: {
+      id: actionId,
+      getSettings: vi.fn().mockResolvedValue(settings),
       setImage: vi.fn().mockResolvedValue(undefined),
       setSettings: vi.fn().mockResolvedValue(undefined),
     },
@@ -240,11 +244,29 @@ describe("AiGatewayMetric", () => {
 
   beforeEach(() => {
     action = new AiGatewayMetric();
+    mockClientAccounts = [];
     mockGetMetrics = vi.fn();
     mockListGateways = vi.fn();
     capturedGlobalListener = null;
     vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token", accountId: "test-account" });
     vi.useFakeTimers();
+  });
+
+  it("should isolate two keys that select different accounts", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+    mockGetMetrics.mockResolvedValue(makeMetrics());
+
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-a" },
+      "key-a",
+    ));
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-b" },
+      "key-b",
+    ));
+
+    expect(mockClientAccounts).toEqual(["account-a", "account-b"]);
+    expect(getPollingCoordinator().subscriberCount).toBe(2);
   });
 
   afterEach(() => {
@@ -398,23 +420,25 @@ describe("AiGatewayMetric", () => {
       await action.onWillAppear(ev);
 
       // The action should be in error state with a future skipUntil
-      expect((action as any).isErrorState).toBe(true);
-      expect((action as any).skipUntil).toBeGreaterThan(Date.now() - 1000);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
+      expect(keyHandler.skipUntil).toBeGreaterThan(Date.now() - 1000);
     });
 
     it("should reset error state after successful fetch", async () => {
       mockGetMetrics.mockRejectedValueOnce(new Error("Fail"));
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
-      expect((action as any).isErrorState).toBe(true);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
 
       // Next coordinator tick succeeds
       mockGetMetrics.mockResolvedValueOnce(makeMetrics());
-      (action as any).skipUntil = 0; // clear backoff for test
+      keyHandler.skipUntil = 0; // clear backoff for test
       await getPollingCoordinator().tick();
 
-      expect((action as any).isErrorState).toBe(false);
-      expect((action as any).skipUntil).toBe(0);
+      expect(keyHandler.isErrorState).toBe(false);
+      expect(keyHandler.skipUntil).toBe(0);
     });
   });
 
@@ -557,6 +581,47 @@ describe("AiGatewayMetric", () => {
   // ── onDidReceiveSettings ───────────────────────────────────────────────
 
   describe("onDidReceiveSettings", () => {
+    it("does not let an older loading render start the newest account request", async () => {
+      mockGetMetrics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(
+        makeMockEvent({
+          ...VALID_SETTINGS,
+          accountId: "account-a",
+        }),
+      );
+      mockGetMetrics.mockClear();
+
+      let releaseOldLoading!: () => void;
+      const oldEvent = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-a",
+        gatewayId: "old-gateway",
+      });
+      oldEvent.action.setImage.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolvePromise) => {
+            releaseOldLoading = resolvePromise;
+          }),
+      );
+      const oldUpdate = action.onDidReceiveSettings(oldEvent);
+      await Promise.resolve();
+
+      const newEvent = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-b",
+        gatewayId: "new-gateway",
+      });
+      await action.onDidReceiveSettings(newEvent);
+      releaseOldLoading();
+      await oldUpdate;
+
+      expect(mockGetMetrics).toHaveBeenCalledTimes(1);
+      expect(mockGetMetrics).toHaveBeenCalledWith(
+        "new-gateway",
+        expect.anything(),
+      );
+    });
+
     it("should show setup image when credentials become missing", async () => {
       vi.mocked(getGlobalSettings).mockReturnValue({});
       const ev = makeMockEvent({});
@@ -668,6 +733,67 @@ describe("AiGatewayMetric", () => {
   // ── onKeyDown (metric cycling) ─────────────────────────────────────────
 
   describe("onKeyDown", () => {
+    it("merges the cycled metric into the latest key settings", async () => {
+      mockGetMetrics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(
+        makeMockEvent({
+          ...VALID_SETTINGS,
+          accountId: "account-a",
+        }),
+      );
+      const keyEv = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-a",
+        gatewayId: "old-gateway",
+      });
+      keyEv.action.getSettings.mockResolvedValue({
+        ...VALID_SETTINGS,
+        accountId: "account-b",
+        gatewayId: "new-gateway",
+      });
+
+      await action.onKeyDown(keyEv);
+
+      expect(keyEv.action.setSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: "account-b",
+          gatewayId: "new-gateway",
+          metric: "tokens",
+        }),
+      );
+    });
+
+    it("does not consume an account change as a key-cycle settings echo", async () => {
+      mockGetMetrics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(
+        makeMockEvent({
+          ...VALID_SETTINGS,
+          accountId: "account-a",
+        }),
+      );
+      await action.onKeyDown(
+        makeMockEvent({
+          ...VALID_SETTINGS,
+          accountId: "account-a",
+        }),
+      );
+      mockGetMetrics.mockClear();
+
+      await action.onDidReceiveSettings(
+        makeMockEvent({
+          ...VALID_SETTINGS,
+          accountId: "account-b",
+          gatewayId: "new-gateway",
+        }),
+      );
+
+      expect(mockGetMetrics).toHaveBeenCalledWith(
+        "new-gateway",
+        expect.anything(),
+      );
+      expect(mockClientAccounts.at(-1)).toBe("account-b");
+    });
+
     it("should cycle from requests to tokens", async () => {
       mockGetMetrics.mockResolvedValue(makeMetrics());
       const ev = makeMockEvent(VALID_SETTINGS);
@@ -892,8 +1018,9 @@ describe("AiGatewayMetric", () => {
 
       // After error, skipUntil should be set to a future timestamp
       // (Date.now() + 2 * intervalMs = 0 + 120_000 with fake timers at t=0)
-      expect((action as any).isErrorState).toBe(true);
-      expect((action as any).skipUntil).toBeGreaterThan(0);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
+      expect(keyHandler.skipUntil).toBeGreaterThan(0);
     });
 
     it("should recover to normal interval after successful fetch", async () => {
@@ -902,16 +1029,17 @@ describe("AiGatewayMetric", () => {
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
 
-      expect((action as any).isErrorState).toBe(true);
-      expect((action as any).skipUntil).toBeGreaterThan(0);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
+      expect(keyHandler.skipUntil).toBeGreaterThan(0);
 
       // Next coordinator tick (after backoff clears) succeeds
       mockGetMetrics.mockResolvedValueOnce(makeMetrics());
-      (action as any).skipUntil = 0; // simulate backoff expired
+      keyHandler.skipUntil = 0; // simulate backoff expired
       await getPollingCoordinator().tick();
 
-      expect((action as any).isErrorState).toBe(false);
-      expect((action as any).skipUntil).toBe(0);
+      expect(keyHandler.isErrorState).toBe(false);
+      expect(keyHandler.skipUntil).toBe(0);
     });
 
     it("should keep cached display when refresh fails", async () => {

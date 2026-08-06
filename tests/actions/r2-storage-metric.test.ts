@@ -13,6 +13,7 @@ import {
   formatMetricValue,
 } from "../../src/actions/r2-storage-metric";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
+import { RateLimitError } from "../../src/services/cloudflare-ai-gateway-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../../src/services/global-settings-store";
 import { resetPollingCoordinator, getPollingCoordinator } from "../../src/services/polling-coordinator";
 import type { R2Metrics, R2MetricType } from "../../src/types/cloudflare-r2";
@@ -40,13 +41,17 @@ vi.mock("@elgato/streamdeck", () => ({
 }));
 
 let mockGetMetrics: ReturnType<typeof vi.fn>;
+let mockClientAccounts: string[];
 
 vi.mock("../../src/services/cloudflare-r2-api", async (importOriginal) => {
   const orig = await importOriginal<typeof import("../../src/services/cloudflare-r2-api")>();
   return {
     ...orig,
     CloudflareR2Api: class MockCloudflareR2Api {
-      constructor() { this.getMetrics = mockGetMetrics; }
+      constructor(_apiToken: string, accountId: string) {
+        mockClientAccounts.push(accountId);
+        this.getMetrics = mockGetMetrics;
+      }
       getMetrics: ReturnType<typeof vi.fn>;
     },
   };
@@ -54,11 +59,13 @@ vi.mock("../../src/services/cloudflare-r2-api", async (importOriginal) => {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMockEvent(settings: Record<string, unknown> = {}) {
+function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1") {
   return {
     payload: { settings },
     action: {
+      id: actionId,
       setImage: vi.fn().mockResolvedValue(undefined),
+      getSettings: vi.fn().mockResolvedValue(settings),
       setSettings: vi.fn().mockResolvedValue(undefined),
     },
   } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -131,10 +138,28 @@ describe("R2StorageMetric", () => {
 
   beforeEach(() => {
     action = new R2StorageMetric();
+    mockClientAccounts = [];
     mockGetMetrics = vi.fn();
     capturedGlobalListener = null;
     vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token", accountId: "test-account" });
     vi.useFakeTimers();
+  });
+
+  it("should isolate two keys that select different accounts", async () => {
+    vi.mocked(getGlobalSettings).mockReturnValue({ apiToken: "test-token" });
+    mockGetMetrics.mockResolvedValue(makeMetrics());
+
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-a" },
+      "key-a",
+    ));
+    await action.onWillAppear(makeMockEvent(
+      { ...VALID_SETTINGS, accountId: "account-b" },
+      "key-b",
+    ));
+
+    expect(mockClientAccounts).toEqual(["account-a", "account-b"]);
+    expect(getPollingCoordinator().subscriberCount).toBe(2);
   });
 
   afterEach(() => {
@@ -174,16 +199,18 @@ describe("R2StorageMetric", () => {
     it("should set error state after error", async () => {
       mockGetMetrics.mockRejectedValueOnce(new Error("Fail"));
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
-      expect((action as any).isErrorState).toBe(true);
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      expect(keyHandler.isErrorState).toBe(true);
     });
 
     it("should reset error state after success", async () => {
       mockGetMetrics.mockRejectedValueOnce(new Error("Fail"));
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
       mockGetMetrics.mockResolvedValueOnce(makeMetrics());
-      (action as any).skipUntil = 0;
+      const keyHandler = (action as any).keyHandlers.get("key-1");
+      keyHandler.skipUntil = 0;
       await getPollingCoordinator().tick();
-      expect((action as any).isErrorState).toBe(false);
+      expect(keyHandler.isErrorState).toBe(false);
     });
   });
 
@@ -241,6 +268,16 @@ describe("R2StorageMetric", () => {
       expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
     });
 
+    it("should clear cached state when the bucket selection is removed", async () => {
+      mockGetMetrics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+
+      const ev = makeMockEvent({ accountId: VALID_SETTINGS.accountId });
+      await action.onDidReceiveSettings(ev);
+
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("...");
+    });
+
     it("should reuse cached metrics on metric-only change", async () => {
       mockGetMetrics.mockResolvedValue(makeMetrics());
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
@@ -259,12 +296,12 @@ describe("R2StorageMetric", () => {
   });
 
   describe("onWillDisappear", () => {
-    it("should clean up without error", () => { expect(() => action.onWillDisappear({} as any)).not.toThrow(); });
+    it("should clean up without error", () => { expect(() => action.onWillDisappear({ action: { id: "key-1" } } as any)).not.toThrow(); });
 
     it("should stop polling", async () => {
       mockGetMetrics.mockResolvedValue(makeMetrics());
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
-      action.onWillDisappear({} as any);
+      action.onWillDisappear({ action: { id: "key-1" } } as any);
       await vi.advanceTimersByTimeAsync(120_000);
       expect(mockGetMetrics).toHaveBeenCalledTimes(1);
     });
@@ -301,6 +338,22 @@ describe("R2StorageMetric", () => {
       await action.onDidReceiveSettings(settingsEv);
       expect(settingsEv.action.setImage).not.toHaveBeenCalled();
     });
+
+    it("should not swallow an account change after a key cycle", async () => {
+      mockGetMetrics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onKeyDown(makeMockEvent(VALID_SETTINGS));
+
+      const settingsEv = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-2",
+        metric: "storage",
+      });
+      await action.onDidReceiveSettings(settingsEv);
+
+      expect(settingsEv.action.setImage).toHaveBeenCalled();
+      expect(mockClientAccounts).toContain("account-2");
+    });
   });
 
   describe("error back-off", () => {
@@ -309,7 +362,7 @@ describe("R2StorageMetric", () => {
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
       ev.action.setImage.mockClear();
-      mockGetMetrics.mockRejectedValueOnce(new Error("Rate limited"));
+      mockGetMetrics.mockRejectedValueOnce(new RateLimitError("r2", 120));
       await vi.advanceTimersByTimeAsync(60_000);
       expect(ev.action.setImage).not.toHaveBeenCalled();
     });

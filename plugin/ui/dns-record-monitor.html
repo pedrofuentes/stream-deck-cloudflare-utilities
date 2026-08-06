@@ -128,9 +128,17 @@
   </head>
   <body>
     <button type="button" id="openSetupBtn" class="settings-btn">
-      ⚙️ Cloudflare Account Settings
+      ⚙️ Cloudflare Plugin Settings
     </button>
     <div class="account-info" id="accountInfo">Checking account settings…</div>
+
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Account</div>
+      <div class="sdpi-item-value">
+        <div id="accountContainer"></div>
+      </div>
+    </div>
+    <div class="status-msg" id="accountStatus"></div>
 
     <hr class="separator" />
     <div class="section-heading">DNS Settings</div>
@@ -173,6 +181,7 @@
     </div>
 
     <script src="filterable-select.js"></script>
+    <script src="account-selector.js"></script>
     <script>
       var websocket = null;
       var piUUID = "";
@@ -191,6 +200,27 @@
           actionSettings.zoneId = value;
           actionSettings.zoneName = label;
           saveActionSettings();
+        },
+      });
+
+      var accountSelector = new CloudflareAccountSelector({
+        container: document.getElementById("accountContainer"),
+        statusElement: document.getElementById("accountStatus"),
+        infoElement: document.getElementById("accountInfo"),
+        getActionSettings: function () { return actionSettings; },
+        saveActionSettings: saveActionSettings,
+        hasConfiguredResource: function (settings) {
+          return !!(settings.zoneId && settings.recordName);
+        },
+        dependentFields: ["zoneId", "zoneName", "recordName"],
+        onAccountChanged: function () {
+          zoneFS.value = "";
+          zoneFS.setItems([]);
+          document.getElementById("recordName").value = "";
+          loadZones();
+        },
+        onAccountReady: function () {
+          if (!zoneFS.value) loadZones();
         },
       });
 
@@ -216,8 +246,7 @@
             var data = JSON.parse(evt.data);
             if (data.event === "didReceiveGlobalSettings") {
               globalSettings = data?.payload?.settings || {};
-              updateAccountInfo();
-              if (globalSettings.apiToken && !zoneFS.value) loadZones();
+              accountSelector.onGlobalSettings(globalSettings);
             }
             if (data.event === "didReceiveSettings") {
               actionSettings = data?.payload?.settings || {};
@@ -230,22 +259,8 @@
       var setupPopup = null;
       document.getElementById("openSetupBtn").addEventListener("click", function () {
         if (setupPopup && !setupPopup.closed) { setupPopup.focus(); return; }
-        setupPopup = window.open("setup.html", "Cloudflare Account Settings", "width=500,height=350");
+        setupPopup = window.open("setup.html", "Cloudflare Plugin Settings", "width=500,height=350");
       });
-
-      function updateAccountInfo() {
-        var el = document.getElementById("accountInfo");
-        if (globalSettings.apiToken && globalSettings.accountId) {
-          el.textContent = "✓ Account configured";
-          el.className = "account-info configured";
-        } else if (globalSettings.apiToken) {
-          el.textContent = "Token set — select an account in Settings";
-          el.className = "account-info not-configured";
-        } else {
-          el.textContent = "Not configured — click Settings above";
-          el.className = "account-info not-configured";
-        }
-      }
 
       var ACTION_FIELDS = ["recordName", "recordType"];
 
@@ -260,6 +275,7 @@
             zoneFS.setDisplayLabel(actionSettings.zoneName);
           }
         }
+        accountSelector.restore();
       }
 
       function saveActionSettings() {
@@ -291,16 +307,26 @@
       }
 
       var zoneStatusDiv = document.getElementById("zoneStatus");
+      var zoneRequestGuard =
+        CloudflareAccountSelectorUtils.createRequestGuard(function () {
+          return (globalSettings.apiToken || "") + "\u0000" + (actionSettings.accountId || "");
+        });
 
       async function loadZones() {
         var apiToken = globalSettings.apiToken;
-        if (!apiToken) {
-          showStatus(zoneStatusDiv, "Configure account in Settings first", "error");
+        var accountId = actionSettings.accountId;
+        if (!apiToken || !accountId) {
+          zoneRequestGuard.invalidate();
+          showStatus(zoneStatusDiv, "Select an account for this key first", "error");
           return;
         }
+        var request = zoneRequestGuard.begin();
         showStatus(zoneStatusDiv, "Loading zones…", "info");
         try {
-          var resp = await fetch(CF_API + "/zones?per_page=50&order=name&direction=asc", { headers: cfHeaders(apiToken) });
+          var resp = await fetch(
+            CF_API + "/zones?account.id=" + encodeURIComponent(accountId) + "&per_page=50&order=name&direction=asc",
+            { headers: cfHeaders(apiToken) }
+          );
           if (!resp.ok) {
             var errText = "HTTP " + resp.status;
             if (resp.status === 401 || resp.status === 403) errText = "Invalid token or insufficient permissions";
@@ -314,10 +340,12 @@
           var zones = data.result.map(function (z) {
             return { value: z.id, label: z.name };
           }).sort(function (a, b) { return a.label.localeCompare(b.label); });
+          if (!zoneRequestGuard.isCurrent(request)) return;
           zoneFS.setItems(zones);
           var count = zones.length;
           showStatus(zoneStatusDiv, count + " zone" + (count !== 1 ? "s" : "") + " found", "success");
         } catch (err) {
+          if (!zoneRequestGuard.isCurrent(request)) return;
           showStatus(zoneStatusDiv, err.message || "Failed to load zones", "error");
         }
       }

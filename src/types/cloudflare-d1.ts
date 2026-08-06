@@ -7,6 +7,7 @@
  * @copyright Pedro Pablo Fuentes Schuster
  * @license MIT
  */
+import type { AccountSelectionSettings } from "./account-selection";
 
 /**
  * Metric types available for the D1 Database Metric action.
@@ -42,7 +43,7 @@ export type D1TimeRange = "24h" | "7d" | "30d";
 /**
  * Settings for the D1 Database Metric action.
  */
-export type D1MetricSettings = {
+export type D1MetricSettings = AccountSelectionSettings & {
   /** D1 database UUID */
   databaseId?: string;
   /** Human-readable database name (saved by the PI) */
