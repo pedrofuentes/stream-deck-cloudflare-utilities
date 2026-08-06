@@ -13,6 +13,7 @@ import {
   formatMetricValue,
 } from "../../src/actions/kv-namespace-metric";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
+import { RateLimitError } from "../../src/services/cloudflare-ai-gateway-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../../src/services/global-settings-store";
 import { resetPollingCoordinator, getPollingCoordinator } from "../../src/services/polling-coordinator";
 import type { KvMetrics, KvMetricType } from "../../src/types/cloudflare-kv";
@@ -64,6 +65,7 @@ function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1
     action: {
       id: actionId,
       setImage: vi.fn().mockResolvedValue(undefined),
+      getSettings: vi.fn().mockResolvedValue(settings),
       setSettings: vi.fn().mockResolvedValue(undefined),
     },
   } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -328,6 +330,22 @@ describe("KvNamespaceMetric", () => {
       await action.onDidReceiveSettings(settingsEv);
       expect(settingsEv.action.setImage).not.toHaveBeenCalled();
     });
+
+    it("should not swallow an account change after a key cycle", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onKeyDown(makeMockEvent(VALID_SETTINGS));
+
+      const settingsEv = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-2",
+        metric: "writes",
+      });
+      await action.onDidReceiveSettings(settingsEv);
+
+      expect(settingsEv.action.setImage).toHaveBeenCalled();
+      expect(mockClientAccounts).toContain("account-2");
+    });
   });
 
   describe("error back-off", () => {
@@ -336,7 +354,7 @@ describe("KvNamespaceMetric", () => {
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
       ev.action.setImage.mockClear();
-      mockGetAnalytics.mockRejectedValueOnce(new Error("Rate limited"));
+      mockGetAnalytics.mockRejectedValueOnce(new RateLimitError("kv", 120));
       await vi.advanceTimersByTimeAsync(60_000);
       expect(ev.action.setImage).not.toHaveBeenCalled();
     });

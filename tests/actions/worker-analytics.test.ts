@@ -13,6 +13,7 @@ import {
 } from "../../src/actions/worker-analytics";
 import { truncateWorkerName } from "../../src/services/cloudflare-workers-api";
 import { STATUS_COLORS } from "../../src/services/key-image-renderer";
+import { RateLimitError } from "../../src/services/cloudflare-ai-gateway-api";
 import { getGlobalSettings, onGlobalSettingsChanged } from "../../src/services/global-settings-store";
 import { resetPollingCoordinator, getPollingCoordinator } from "../../src/services/polling-coordinator";
 import type {
@@ -67,6 +68,7 @@ function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1
     action: {
       id: actionId,
       setImage: vi.fn().mockResolvedValue(undefined),
+      getSettings: vi.fn().mockResolvedValue(settings),
       setSettings: vi.fn().mockResolvedValue(undefined),
     },
   } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -290,6 +292,16 @@ describe("WorkerAnalytics", () => {
       expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
     });
 
+    it("should clear cached state when the worker selection is removed", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+
+      const ev = makeMockEvent({ accountId: VALID_SETTINGS.accountId });
+      await action.onDidReceiveSettings(ev);
+
+      expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("...");
+    });
+
     it("should reuse cached metrics on metric-only change", async () => {
       mockGetAnalytics.mockResolvedValue(makeMetrics());
       await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
@@ -350,6 +362,22 @@ describe("WorkerAnalytics", () => {
       await action.onDidReceiveSettings(settingsEv);
       expect(settingsEv.action.setImage).not.toHaveBeenCalled();
     });
+
+    it("should not swallow an account change after a key cycle", async () => {
+      mockGetAnalytics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(makeMockEvent(VALID_SETTINGS));
+      await action.onKeyDown(makeMockEvent(VALID_SETTINGS));
+
+      const settingsEv = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-2",
+        metric: "errors",
+      });
+      await action.onDidReceiveSettings(settingsEv);
+
+      expect(settingsEv.action.setImage).toHaveBeenCalled();
+      expect(mockClientAccounts).toContain("account-2");
+    });
   });
 
   describe("error back-off", () => {
@@ -358,7 +386,7 @@ describe("WorkerAnalytics", () => {
       const ev = makeMockEvent(VALID_SETTINGS);
       await action.onWillAppear(ev);
       ev.action.setImage.mockClear();
-      mockGetAnalytics.mockRejectedValueOnce(new Error("Rate limited"));
+      mockGetAnalytics.mockRejectedValueOnce(new RateLimitError("worker", 120));
       await vi.advanceTimersByTimeAsync(60_000);
       expect(ev.action.setImage).not.toHaveBeenCalled();
     });
