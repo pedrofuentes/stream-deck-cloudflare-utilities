@@ -1,8 +1,7 @@
 # Per-Key Cloudflare Account Selection Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use
-> `superpowers:subagent-driven-development` or `superpowers:executing-plans`. Follow every
-> RED/GREEN commit pair in order.
+> **Historical implementation note:** This plan was carried out as test-first RED/GREEN
+> increments, with each behavior change preceded by its failing test commit.
 
 **Goal:** Allow authenticated Stream Deck keys sharing one global Cloudflare token to select
 and operate against different Cloudflare accounts.
