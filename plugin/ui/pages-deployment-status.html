@@ -287,14 +287,20 @@
       }
 
       var projectStatusDiv = document.getElementById("projectStatus");
+      var projectRequestGuard =
+        CloudflareAccountSelectorUtils.createRequestGuard(function () {
+          return (globalSettings.apiToken || "") + "\u0000" + (actionSettings.accountId || "");
+        });
 
       async function loadProjects() {
         var apiToken = globalSettings.apiToken;
         var accountId = actionSettings.accountId;
         if (!apiToken || !accountId) {
+          projectRequestGuard.invalidate();
           showStatus(projectStatusDiv, "Select an account for this key first", "error");
           return;
         }
+        var request = projectRequestGuard.begin();
         showStatus(projectStatusDiv, "Loading projects…", "info");
         try {
           var resp = await fetch(
@@ -315,10 +321,12 @@
           var projects = data.result.map(function (p) {
             return { value: p.name, label: p.name };
           }).sort(function (a, b) { return a.label.localeCompare(b.label); });
+          if (!projectRequestGuard.isCurrent(request)) return;
           projectFS.setItems(projects);
           var count = projects.length;
           showStatus(projectStatusDiv, count + " project" + (count !== 1 ? "s" : "") + " found", "success");
         } catch (err) {
+          if (!projectRequestGuard.isCurrent(request)) return;
           showStatus(projectStatusDiv, err.message || "Failed to load projects", "error");
         }
       }

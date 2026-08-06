@@ -97,7 +97,12 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
   private lastBucketName: string | null = null;
   private displayMetric: R2MetricType = "objects";
   private lastDataSettings: { accountId?: string; bucketName?: string; timeRange?: string } = {};
-  private pendingKeyCycle = false;
+  private pendingKeyCycle: {
+    metric: R2MetricType;
+    accountId?: string;
+    bucketName?: string;
+    timeRange?: string;
+  } | null = null;
   private lastEvent: WillAppearEvent<R2MetricSettings> | DidReceiveSettingsEvent<R2MetricSettings> | null = null;
   private unsubscribeGlobal: (() => void) | null = null;
   private unsubscribeCoordinator: (() => void) | null = null;
@@ -113,6 +118,7 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
       await keyHandler.onWillAppear(ev);
       return;
     }
+    const generation = ++this.fetchGeneration;
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
     this.subscribeToCoordinator();
@@ -131,7 +137,8 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
     }
 
     const accountId = this.getAccountId(settings, global)!;
-    this.apiClient = new CloudflareR2Api(global.apiToken!, accountId);
+    const apiClient = new CloudflareR2Api(global.apiToken!, accountId);
+    this.apiClient = apiClient;
     this.lastDataSettings = { accountId, bucketName: settings.bucketName, timeRange: settings.timeRange };
     this.displayMetric = settings.metric ?? "objects";
     this.marquee.setText(settings.bucketName ?? "");
@@ -144,8 +151,9 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
         statusColor: metricColor(this.displayMetric),
       })
     );
+    if (this.fetchGeneration !== generation) return;
 
-    await this.updateMetrics(ev);
+    await this.updateMetrics(ev, generation, apiClient);
   }
 
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<R2MetricSettings>): Promise<void> {
@@ -154,7 +162,7 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
       await keyHandler.onDidReceiveSettings(ev);
       return;
     }
-    this.fetchGeneration += 1;
+    const generation = ++this.fetchGeneration;
     this.lastEvent = ev;
 
     const settings = ev.payload.settings;
@@ -182,11 +190,16 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
       this.getAccountId(settings, global) !== this.lastDataSettings.accountId ||
       settings.bucketName !== this.lastDataSettings.bucketName ||
       settings.timeRange !== this.lastDataSettings.timeRange;
-
-    if (this.pendingKeyCycle) {
-      this.pendingKeyCycle = false;
-      return;
-    }
+    const pendingKeyCycle = this.pendingKeyCycle;
+    this.pendingKeyCycle = null;
+    if (
+      pendingKeyCycle &&
+      !dataChanged &&
+      settings.metric === pendingKeyCycle.metric &&
+      this.getAccountId(settings, global) === pendingKeyCycle.accountId &&
+      settings.bucketName === pendingKeyCycle.bucketName &&
+      settings.timeRange === pendingKeyCycle.timeRange
+    ) return;
 
     this.displayMetric = settings.metric ?? "objects";
 
@@ -194,13 +207,15 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
       await ev.action.setImage(
         this.renderMetric(this.displayMetric, this.lastBucketName ?? "", this.lastMetrics, settings.timeRange, this.marquee.getCurrentText())
       );
+      if (this.fetchGeneration !== generation) return;
       this.startMarqueeIfNeeded();
       return;
     }
 
     this.stopMarqueeTimer();
     const accountId = this.getAccountId(settings, global)!;
-    this.apiClient = new CloudflareR2Api(global.apiToken!, accountId);
+    const apiClient = new CloudflareR2Api(global.apiToken!, accountId);
+    this.apiClient = apiClient;
     this.lastMetrics = null;
     this.lastBucketName = null;
     this.lastDataSettings = { accountId, bucketName: settings.bucketName, timeRange: settings.timeRange };
@@ -214,8 +229,9 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
         statusColor: metricColor(this.displayMetric),
       })
     );
+    if (this.fetchGeneration !== generation) return;
 
-    await this.updateMetrics(ev);
+    await this.updateMetrics(ev, generation, apiClient);
   }
 
   override onWillDisappear(ev: WillDisappearEvent<R2MetricSettings>): void {
@@ -234,7 +250,7 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
     this.lastMetrics = null;
     this.lastBucketName = null;
     this.lastDataSettings = {};
-    this.pendingKeyCycle = false;
+    this.pendingKeyCycle = null;
     this.displayMetric = "objects";
     this.marquee.setText("");
     this.lastEvent = null;
@@ -270,17 +286,27 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
       this.startMarqueeIfNeeded();
     }
 
-    this.pendingKeyCycle = true;
-    await ev.action.setSettings({ ...settings, metric: nextMetric });
+    const latestSettings =
+      typeof ev.action.getSettings === "function"
+        ? await ev.action.getSettings<R2MetricSettings>()
+        : settings;
+    this.pendingKeyCycle = {
+      metric: nextMetric,
+      accountId: this.getAccountId(latestSettings, global),
+      bucketName: latestSettings.bucketName,
+      timeRange: latestSettings.timeRange,
+    };
+    await ev.action.setSettings({ ...latestSettings, metric: nextMetric });
   }
 
   private async updateMetrics(
-    ev: WillAppearEvent<R2MetricSettings> | KeyDownEvent<R2MetricSettings> | DidReceiveSettingsEvent<R2MetricSettings>
+    ev: WillAppearEvent<R2MetricSettings> | KeyDownEvent<R2MetricSettings> | DidReceiveSettingsEvent<R2MetricSettings>,
+    generation: number,
+    apiClient: CloudflareR2Api,
   ): Promise<void> {
-    const gen = ++this.fetchGeneration;
     const settings = ev.payload.settings;
 
-    if (!this.apiClient || !settings.bucketName) {
+    if (!settings.bucketName) {
       await ev.action.setImage(renderPlaceholderImage());
       return;
     }
@@ -288,8 +314,8 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
     const timeRange = settings.timeRange ?? "24h";
 
     try {
-      const metrics = await this.apiClient.getMetrics(settings.bucketName, timeRange);
-      if (this.fetchGeneration !== gen) return;
+      const metrics = await apiClient.getMetrics(settings.bucketName, timeRange);
+      if (this.fetchGeneration !== generation) return;
 
       this.lastMetrics = metrics;
       this.lastBucketName = settings.bucketName;
@@ -301,7 +327,7 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
       );
       this.startMarqueeIfNeeded();
     } catch (error) {
-      if (this.fetchGeneration !== gen) return;
+      if (this.fetchGeneration !== generation) return;
       this.isErrorState = true;
 
       if (error instanceof RateLimitError && error.retryAfterSeconds > 0) {
@@ -350,7 +376,8 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
   private async onCoordinatorTick(): Promise<void> {
     if (Date.now() < this.skipUntil) return;
     if (!this.apiClient || !this.lastEvent) return;
-    await this.updateMetrics(this.lastEvent);
+    const generation = ++this.fetchGeneration;
+    await this.updateMetrics(this.lastEvent, generation, this.apiClient);
   }
 
   private startMarqueeIfNeeded(): void {
@@ -382,6 +409,7 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
     if (this.unsubscribeGlobal) return;
     this.unsubscribeGlobal = onGlobalSettingsChanged(async () => {
       if (!this.lastEvent) return;
+      const generation = ++this.fetchGeneration;
       this.stopMarqueeTimer();
       this.apiClient = null;
       this.lastMetrics = null;
@@ -395,8 +423,9 @@ export class R2StorageMetric extends SingletonAction<R2MetricSettings> {
       if (!this.hasCredentials(global, settings)) { await ev.action.setImage(renderSetupImage()); return; }
       if (!this.hasRequiredSettings(settings, global)) { await ev.action.setImage(renderPlaceholderImage()); return; }
       const accountId = this.getAccountId(settings, global)!;
-      this.apiClient = new CloudflareR2Api(global.apiToken!, accountId);
-      await this.updateMetrics(ev);
+      const apiClient = new CloudflareR2Api(global.apiToken!, accountId);
+      this.apiClient = apiClient;
+      await this.updateMetrics(ev, generation, apiClient);
     });
   }
 }

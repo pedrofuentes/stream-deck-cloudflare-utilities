@@ -385,12 +385,17 @@
       /* ───────── Worker List Fetch ───────── */
 
       var workerStatusDiv = document.getElementById("workerStatus");
+      var workerRequestGuard =
+        CloudflareAccountSelectorUtils.createRequestGuard(function () {
+          return (globalSettings.apiToken || "") + "\u0000" + (actionSettings.accountId || "");
+        });
 
       async function loadWorkers() {
         var apiToken = globalSettings.apiToken;
         var accountId = actionSettings.accountId;
 
         if (!apiToken || !accountId) {
+          workerRequestGuard.invalidate();
           showStatus(
             workerStatusDiv,
             "Select an account for this key first",
@@ -399,6 +404,7 @@
           return;
         }
 
+        var request = workerRequestGuard.begin();
         showStatus(workerStatusDiv, "Loading workers…", "info");
 
         try {
@@ -437,6 +443,7 @@
               return a.label.localeCompare(b.label);
             });
 
+          if (!workerRequestGuard.isCurrent(request)) return;
           workerFS.setItems(workers);
 
           var count = workers.length;
@@ -446,6 +453,7 @@
             "success"
           );
         } catch (err) {
+          if (!workerRequestGuard.isCurrent(request)) return;
           showStatus(
             workerStatusDiv,
             err.message || "Failed to load workers",

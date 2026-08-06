@@ -379,6 +379,7 @@ export class PagesDeploymentStatus extends SingletonAction<PagesDeploymentSettin
 
     this.unsubscribeGlobal = onGlobalSettingsChanged(async () => {
       if (!this.lastEvent) return;
+      this.fetchGeneration += 1;
 
       this.clearDisplayInterval();
       this.stopMarqueeTimer();

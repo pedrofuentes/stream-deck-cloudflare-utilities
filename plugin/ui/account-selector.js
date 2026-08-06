@@ -32,7 +32,7 @@
     return new Error(message || "HTTP " + response.status);
   }
 
-  async function fetchAccounts(fetchImpl, apiToken, apiBase) {
+  async function fetchAccounts(fetchImpl, apiToken, apiBase, signal) {
     var accounts = [];
     var page = 1;
     var totalPages = 1;
@@ -41,7 +41,7 @@
     do {
       var response = await fetchImpl(
         base + "/accounts?per_page=50&page=" + page,
-        { headers: cfHeaders(apiToken) }
+        { headers: cfHeaders(apiToken), signal: signal }
       );
       var data = await response.json();
       if (!response.ok || !data.success || !Array.isArray(data.result)) {
@@ -112,9 +112,37 @@
           : "#969696";
   }
 
+  function createRequestGuard(getIdentity) {
+    var generation = 0;
+
+    return {
+      begin: function () {
+        generation += 1;
+        return {
+          generation: generation,
+          identity: getIdentity(),
+        };
+      },
+      invalidate: function () {
+        generation += 1;
+      },
+      isCurrent: function (request) {
+        return (
+          request &&
+          request.generation === generation &&
+          request.identity === getIdentity()
+        );
+      },
+    };
+  }
+
   function CloudflareAccountSelector(options) {
     this.options = options;
     this.globalSettings = {};
+    this.loadGeneration = 0;
+    this.loadAbortController = null;
+    this.loadTimeout = null;
+    this.reloadTimer = null;
     this.select = new global.FilterableSelect({
       container: options.container,
       setting: "accountId",
@@ -157,8 +185,30 @@
     if (migrated) {
       this.options.saveActionSettings();
     }
+    if (this.reloadTimer) {
+      global.clearTimeout(this.reloadTimer);
+      this.reloadTimer = null;
+    }
     if (this.globalSettings.apiToken) {
-      this.loadAccounts();
+      var selector = this;
+      this.reloadTimer = global.setTimeout(function () {
+        selector.reloadTimer = null;
+        selector.loadAccounts();
+      }, 200);
+    } else {
+      this.invalidateAccountLoads();
+    }
+  };
+
+  CloudflareAccountSelector.prototype.invalidateAccountLoads = function () {
+    this.loadGeneration += 1;
+    if (this.loadAbortController) {
+      this.loadAbortController.abort();
+      this.loadAbortController = null;
+    }
+    if (this.loadTimeout) {
+      global.clearTimeout(this.loadTimeout);
+      this.loadTimeout = null;
     }
   };
 
@@ -200,6 +250,7 @@
   CloudflareAccountSelector.prototype.loadAccounts = async function () {
     var token = this.globalSettings.apiToken;
     if (!token) {
+      this.invalidateAccountLoads();
       showStatus(
         this.options.statusElement,
         "Configure the API token in Settings first",
@@ -208,13 +259,30 @@
       return;
     }
 
+    this.invalidateAccountLoads();
+    var generation = ++this.loadGeneration;
+    var controller = new global.AbortController();
+    this.loadAbortController = controller;
+    var selector = this;
+    this.loadTimeout = global.setTimeout(function () {
+      controller.abort();
+    }, 10000);
+    function isCurrent() {
+      return (
+        selector.loadGeneration === generation &&
+        selector.globalSettings.apiToken === token
+      );
+    }
+
     showStatus(this.options.statusElement, "Loading accounts…", "info");
     try {
       var accounts = await fetchAccounts(
         global.fetch.bind(global),
         token,
-        this.options.apiBase
+        this.options.apiBase,
+        controller.signal
       );
+      if (!isCurrent()) return;
       this.select.setItems(accounts);
 
       var settings = this.getSettings();
@@ -244,18 +312,28 @@
         this.options.onAccountReady();
       }
     } catch (error) {
+      if (!isCurrent() || error.name === "AbortError") return;
       this.select.setItems([]);
       showStatus(
         this.options.statusElement,
         error.message || "Failed to load accounts",
         "error"
       );
+    } finally {
+      if (isCurrent()) {
+        if (this.loadTimeout) {
+          global.clearTimeout(this.loadTimeout);
+          this.loadTimeout = null;
+        }
+        this.loadAbortController = null;
+      }
     }
   };
 
   global.CloudflareAccountSelector = CloudflareAccountSelector;
   global.CloudflareAccountSelectorUtils = {
     applyAccountSelection: applyAccountSelection,
+    createRequestGuard: createRequestGuard,
     fetchAccounts: fetchAccounts,
     migrateLegacyAccount: migrateLegacyAccount,
   };

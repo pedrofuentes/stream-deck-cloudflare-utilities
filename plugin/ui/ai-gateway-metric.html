@@ -390,16 +390,22 @@
       /* ───────── Gateway List Fetch ───────── */
 
       const gatewayStatusDiv = document.getElementById("gatewayStatus");
+      var gatewayRequestGuard =
+        CloudflareAccountSelectorUtils.createRequestGuard(function () {
+          return (globalSettings.apiToken || "") + "\u0000" + (actionSettings.accountId || "");
+        });
 
       async function loadGateways() {
         var apiToken = globalSettings.apiToken;
         var accountId = actionSettings.accountId;
 
         if (!apiToken || !accountId) {
+          gatewayRequestGuard.invalidate();
           showStatus(gatewayStatusDiv, "Select an account for this key first", "error");
           return;
         }
 
+        var request = gatewayRequestGuard.begin();
         showStatus(gatewayStatusDiv, "Loading gateways…", "info");
 
         try {
@@ -438,6 +444,7 @@
               return a.label.localeCompare(b.label);
             });
 
+          if (!gatewayRequestGuard.isCurrent(request)) return;
           gatewayFS.setItems(gateways);
 
           var count = gateways.length;
@@ -454,6 +461,7 @@
             saveActionSettings();
           }
         } catch (err) {
+          if (!gatewayRequestGuard.isCurrent(request)) return;
           showStatus(
             gatewayStatusDiv,
             err.message || "Failed to load gateways",

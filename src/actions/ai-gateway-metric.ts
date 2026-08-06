@@ -142,12 +142,13 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   /** Tracks data-affecting settings so metric-only changes skip refetch. */
   private lastDataSettings: { accountId?: string; gatewayId?: string; timeRange?: string } = {};
 
-  /**
-   * Set to `true` by onKeyDown before calling setSettings().
-   * When onDidReceiveSettings fires as a result, it detects this flag,
-   * skips re-rendering (onKeyDown already rendered), resets the flag.
-   */
-  private pendingKeyCycle = false;
+  /** Exact metric-only settings echo expected after a key-cycle write. */
+  private pendingKeyCycle: {
+    metric: AiGatewayMetricType;
+    accountId?: string;
+    gatewayId?: string;
+    timeRange?: string;
+  } | null = null;
 
   /** Stored event reference for re-initialization on global settings change. */
   private lastEvent: WillAppearEvent<AiGatewayMetricSettings> | DidReceiveSettingsEvent<AiGatewayMetricSettings> | null = null;
@@ -182,6 +183,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       await keyHandler.onWillAppear(ev);
       return;
     }
+    const generation = ++this.fetchGeneration;
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
     this.subscribeToCoordinator();
@@ -200,7 +202,8 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     }
 
     const accountId = this.getAccountId(settings, global)!;
-    this.apiClient = new CloudflareAiGatewayApi(global.apiToken!, accountId);
+    const apiClient = new CloudflareAiGatewayApi(global.apiToken!, accountId);
+    this.apiClient = apiClient;
     this.lastDataSettings = { accountId, gatewayId: settings.gatewayId, timeRange: settings.timeRange };
     this.displayMetric = settings.metric ?? "requests";
     const displayLabel = settings.gatewayName ?? settings.gatewayId ?? "";
@@ -215,8 +218,9 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
         statusColor: metricColor(this.displayMetric),
       })
     );
+    if (this.fetchGeneration !== generation) return;
 
-    await this.updateMetrics(ev);
+    await this.updateMetrics(ev, generation, apiClient);
   }
 
   /**
@@ -233,7 +237,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       await keyHandler.onDidReceiveSettings(ev);
       return;
     }
-    this.fetchGeneration += 1;
+    const generation = ++this.fetchGeneration;
     this.lastEvent = ev;
 
     const settings = ev.payload.settings;
@@ -263,11 +267,16 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       this.getAccountId(settings, global) !== this.lastDataSettings.accountId ||
       settings.gatewayId !== this.lastDataSettings.gatewayId ||
       settings.timeRange !== this.lastDataSettings.timeRange;
-
-    // Key-press cycle: onKeyDown already rendered the new metric and
-    // updated displayMetric — just schedule the next poll.
-    if (this.pendingKeyCycle) {
-      this.pendingKeyCycle = false;
+    const pendingKeyCycle = this.pendingKeyCycle;
+    this.pendingKeyCycle = null;
+    if (
+      pendingKeyCycle &&
+      !dataChanged &&
+      settings.metric === pendingKeyCycle.metric &&
+      this.getAccountId(settings, global) === pendingKeyCycle.accountId &&
+      settings.gatewayId === pendingKeyCycle.gatewayId &&
+      settings.timeRange === pendingKeyCycle.timeRange
+    ) {
       return;
     }
 
@@ -279,6 +288,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       await ev.action.setImage(
         this.renderMetric(this.displayMetric, this.lastGatewayName ?? this.lastGatewayId ?? "", this.lastMetrics, settings.timeRange, this.marquee.getCurrentText())
       );
+      if (this.fetchGeneration !== generation) return;
       this.startMarqueeIfNeeded();
       return;
     }
@@ -286,7 +296,8 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     // Data-affecting settings changed — full reset and refetch
     this.stopMarqueeTimer();
     const accountId = this.getAccountId(settings, global)!;
-    this.apiClient = new CloudflareAiGatewayApi(global.apiToken!, accountId);
+    const apiClient = new CloudflareAiGatewayApi(global.apiToken!, accountId);
+    this.apiClient = apiClient;
     this.lastMetrics = null;
     this.lastGatewayId = null;
     this.lastGatewayName = null;
@@ -303,8 +314,9 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
         statusColor: metricColor(this.displayMetric),
       })
     );
+    if (this.fetchGeneration !== generation) return;
 
-    await this.updateMetrics(ev);
+    await this.updateMetrics(ev, generation, apiClient);
   }
 
   /**
@@ -327,7 +339,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     this.lastGatewayId = null;
     this.lastGatewayName = null;
     this.lastDataSettings = {};
-    this.pendingKeyCycle = false;
+    this.pendingKeyCycle = null;
     this.displayMetric = "requests";
     this.marquee.setText("");
     this.lastEvent = null;
@@ -374,13 +386,17 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       this.startMarqueeIfNeeded();
     }
 
-    // Persist the new metric to settings (for PI sync and restart persistence).
-    // This triggers onDidReceiveSettings — the pendingKeyCycle flag tells
-    // it to only schedule the next poll without re-rendering.
-    this.pendingKeyCycle = true;
-    const newSettings: AiGatewayMetricSettings = { ...settings, metric: nextMetric };
+    // Merge into the latest persisted settings so a concurrent Property
+    // Inspector account/resource update is never overwritten by a stale event.
+    const latestSettings = await ev.action.getSettings<AiGatewayMetricSettings>();
+    const newSettings: AiGatewayMetricSettings = { ...latestSettings, metric: nextMetric };
+    this.pendingKeyCycle = {
+      metric: nextMetric,
+      accountId: this.getAccountId(latestSettings, global),
+      gatewayId: latestSettings.gatewayId,
+      timeRange: latestSettings.timeRange,
+    };
     await ev.action.setSettings(newSettings);
-    // If no cache, onDidReceiveSettings (triggered by setSettings) will handle the fetch
   }
 
   /**
@@ -391,11 +407,12 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     ev: WillAppearEvent<AiGatewayMetricSettings>
       | KeyDownEvent<AiGatewayMetricSettings>
       | DidReceiveSettingsEvent<AiGatewayMetricSettings>,
+    generation: number,
+    apiClient: CloudflareAiGatewayApi,
   ): Promise<void> {
-    const gen = ++this.fetchGeneration;
     const settings = ev.payload.settings;
 
-    if (!this.apiClient || !settings.gatewayId) {
+    if (!settings.gatewayId) {
       await ev.action.setImage(renderPlaceholderImage());
       return;
     }
@@ -403,10 +420,10 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
     const timeRange = settings.timeRange ?? "24h";
 
     try {
-      const metrics = await this.apiClient.getMetrics(settings.gatewayId, timeRange);
+      const metrics = await apiClient.getMetrics(settings.gatewayId, timeRange);
 
       // Verify this fetch is still current
-      if (this.fetchGeneration !== gen) return;
+      if (this.fetchGeneration !== generation) return;
 
       this.lastMetrics = metrics;
       this.lastGatewayId = settings.gatewayId;
@@ -423,7 +440,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       this.startMarqueeIfNeeded();
     } catch (error) {
       // If stale, silently abort — a newer cycle owns the display
-      if (this.fetchGeneration !== gen) return;
+      if (this.fetchGeneration !== generation) return;
 
       this.isErrorState = true;
 
@@ -539,7 +556,8 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
   private async onCoordinatorTick(): Promise<void> {
     if (Date.now() < this.skipUntil) return;
     if (!this.apiClient || !this.lastEvent) return;
-    await this.updateMetrics(this.lastEvent);
+    const generation = ++this.fetchGeneration;
+    await this.updateMetrics(this.lastEvent, generation, this.apiClient);
   }
 
   /**
@@ -591,6 +609,7 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
 
     this.unsubscribeGlobal = onGlobalSettingsChanged(async () => {
       if (!this.lastEvent) return;
+      const generation = ++this.fetchGeneration;
 
       // Re-run the same flow as onDidReceiveSettings
       this.stopMarqueeTimer();
@@ -619,9 +638,10 @@ export class AiGatewayMetric extends SingletonAction<AiGatewayMetricSettings> {
       }
 
       const accountId = this.getAccountId(settings, global)!;
-      this.apiClient = new CloudflareAiGatewayApi(global.apiToken!, accountId);
+      const apiClient = new CloudflareAiGatewayApi(global.apiToken!, accountId);
+      this.apiClient = apiClient;
 
-      await this.updateMetrics(ev);
+      await this.updateMetrics(ev, generation, apiClient);
     });
   }
 }

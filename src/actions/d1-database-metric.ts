@@ -102,7 +102,12 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
   private lastDbName: string | null = null;
   private displayMetric: D1MetricType = "reads";
   private lastDataSettings: { accountId?: string; databaseId?: string; timeRange?: string } = {};
-  private pendingKeyCycle = false;
+  private pendingKeyCycle: {
+    metric: D1MetricType;
+    accountId?: string;
+    databaseId?: string;
+    timeRange?: string;
+  } | null = null;
   private lastEvent: WillAppearEvent<D1MetricSettings> | DidReceiveSettingsEvent<D1MetricSettings> | null = null;
   private unsubscribeGlobal: (() => void) | null = null;
   private unsubscribeCoordinator: (() => void) | null = null;
@@ -118,6 +123,7 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
       await keyHandler.onWillAppear(ev);
       return;
     }
+    const generation = ++this.fetchGeneration;
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
     this.subscribeToCoordinator();
@@ -129,7 +135,8 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
     if (!this.hasRequiredSettings(settings, global)) { await ev.action.setImage(renderPlaceholderImage()); return; }
 
     const accountId = this.getAccountId(settings, global)!;
-    this.apiClient = new CloudflareD1Api(global.apiToken!, accountId);
+    const apiClient = new CloudflareD1Api(global.apiToken!, accountId);
+    this.apiClient = apiClient;
     this.lastDataSettings = { accountId, databaseId: settings.databaseId, timeRange: settings.timeRange };
     this.displayMetric = settings.metric ?? "reads";
     this.marquee.setText(settings.databaseName ?? settings.databaseId ?? "");
@@ -140,8 +147,9 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
       line3: D1_METRIC_SHORT_LABELS[this.displayMetric] ?? "",
       statusColor: metricColor(this.displayMetric),
     }));
+    if (this.fetchGeneration !== generation) return;
 
-    await this.updateMetrics(ev);
+    await this.updateMetrics(ev, generation, apiClient);
   }
 
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<D1MetricSettings>): Promise<void> {
@@ -150,7 +158,7 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
       await keyHandler.onDidReceiveSettings(ev);
       return;
     }
-    this.fetchGeneration += 1;
+    const generation = ++this.fetchGeneration;
     this.lastEvent = ev;
     const settings = ev.payload.settings;
     const global = getGlobalSettings();
@@ -159,20 +167,30 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
     if (!this.hasRequiredSettings(settings, global)) { this.apiClient = null; this.lastMetrics = null; this.lastDbId = null; this.lastDbName = null; this.lastDataSettings = {}; await ev.action.setImage(renderPlaceholderImage()); return; }
 
     const dataChanged = this.getAccountId(settings, global) !== this.lastDataSettings.accountId || settings.databaseId !== this.lastDataSettings.databaseId || settings.timeRange !== this.lastDataSettings.timeRange;
-
-    if (this.pendingKeyCycle) { this.pendingKeyCycle = false; return; }
+    const pendingKeyCycle = this.pendingKeyCycle;
+    this.pendingKeyCycle = null;
+    if (
+      pendingKeyCycle &&
+      !dataChanged &&
+      settings.metric === pendingKeyCycle.metric &&
+      this.getAccountId(settings, global) === pendingKeyCycle.accountId &&
+      settings.databaseId === pendingKeyCycle.databaseId &&
+      settings.timeRange === pendingKeyCycle.timeRange
+    ) return;
 
     this.displayMetric = settings.metric ?? "reads";
 
     if (!dataChanged && this.lastMetrics && this.apiClient) {
       await ev.action.setImage(this.renderMetric(this.displayMetric, this.lastDbName ?? this.lastDbId ?? "", this.lastMetrics, settings.timeRange, this.marquee.getCurrentText()));
+      if (this.fetchGeneration !== generation) return;
       this.startMarqueeIfNeeded();
       return;
     }
 
     this.stopMarqueeTimer();
     const accountId = this.getAccountId(settings, global)!;
-    this.apiClient = new CloudflareD1Api(global.apiToken!, accountId);
+    const apiClient = new CloudflareD1Api(global.apiToken!, accountId);
+    this.apiClient = apiClient;
     this.lastMetrics = null;
     this.lastDbId = null;
     this.lastDbName = null;
@@ -185,8 +203,9 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
       line3: D1_METRIC_SHORT_LABELS[this.displayMetric] ?? "",
       statusColor: metricColor(this.displayMetric),
     }));
+    if (this.fetchGeneration !== generation) return;
 
-    await this.updateMetrics(ev);
+    await this.updateMetrics(ev, generation, apiClient);
   }
 
   override onWillDisappear(ev: WillDisappearEvent<D1MetricSettings>): void {
@@ -203,7 +222,7 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
     this.lastDbId = null;
     this.lastDbName = null;
     this.lastDataSettings = {};
-    this.pendingKeyCycle = false;
+    this.pendingKeyCycle = null;
     this.displayMetric = "reads";
     this.marquee.setText("");
     this.lastEvent = null;
@@ -233,22 +252,32 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
       this.startMarqueeIfNeeded();
     }
 
-    this.pendingKeyCycle = true;
-    await ev.action.setSettings({ ...settings, metric: nextMetric });
+    const latestSettings =
+      typeof ev.action.getSettings === "function"
+        ? await ev.action.getSettings<D1MetricSettings>()
+        : settings;
+    this.pendingKeyCycle = {
+      metric: nextMetric,
+      accountId: this.getAccountId(latestSettings, global),
+      databaseId: latestSettings.databaseId,
+      timeRange: latestSettings.timeRange,
+    };
+    await ev.action.setSettings({ ...latestSettings, metric: nextMetric });
   }
 
   private async updateMetrics(
-    ev: WillAppearEvent<D1MetricSettings> | KeyDownEvent<D1MetricSettings> | DidReceiveSettingsEvent<D1MetricSettings>
+    ev: WillAppearEvent<D1MetricSettings> | KeyDownEvent<D1MetricSettings> | DidReceiveSettingsEvent<D1MetricSettings>,
+    generation: number,
+    apiClient: CloudflareD1Api,
   ): Promise<void> {
-    const gen = ++this.fetchGeneration;
     const settings = ev.payload.settings;
-    if (!this.apiClient || !settings.databaseId) { await ev.action.setImage(renderPlaceholderImage()); return; }
+    if (!settings.databaseId) { await ev.action.setImage(renderPlaceholderImage()); return; }
 
     const timeRange = settings.timeRange ?? "24h";
 
     try {
-      const metrics = await this.apiClient.getAnalytics(settings.databaseId, timeRange);
-      if (this.fetchGeneration !== gen) return;
+      const metrics = await apiClient.getAnalytics(settings.databaseId, timeRange);
+      if (this.fetchGeneration !== generation) return;
 
       this.lastMetrics = metrics;
       this.lastDbId = settings.databaseId;
@@ -259,7 +288,7 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
       await ev.action.setImage(this.renderMetric(this.displayMetric, settings.databaseName ?? settings.databaseId ?? "", metrics, timeRange, this.marquee.getCurrentText()));
       this.startMarqueeIfNeeded();
     } catch (error) {
-      if (this.fetchGeneration !== gen) return;
+      if (this.fetchGeneration !== generation) return;
       this.isErrorState = true;
 
       if (error instanceof RateLimitError && error.retryAfterSeconds > 0) {
@@ -310,7 +339,8 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
   private async onCoordinatorTick(): Promise<void> {
     if (Date.now() < this.skipUntil) return;
     if (!this.apiClient || !this.lastEvent) return;
-    await this.updateMetrics(this.lastEvent);
+    const generation = ++this.fetchGeneration;
+    await this.updateMetrics(this.lastEvent, generation, this.apiClient);
   }
 
   private startMarqueeIfNeeded(): void {
@@ -335,6 +365,7 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
     if (this.unsubscribeGlobal) return;
     this.unsubscribeGlobal = onGlobalSettingsChanged(async () => {
       if (!this.lastEvent) return;
+      const generation = ++this.fetchGeneration;
       this.stopMarqueeTimer();
       this.apiClient = null;
       this.lastMetrics = null;
@@ -349,8 +380,9 @@ export class D1DatabaseMetric extends SingletonAction<D1MetricSettings> {
       if (!this.hasCredentials(global, settings)) { await ev.action.setImage(renderSetupImage()); return; }
       if (!this.hasRequiredSettings(settings, global)) { await ev.action.setImage(renderPlaceholderImage()); return; }
       const accountId = this.getAccountId(settings, global)!;
-      this.apiClient = new CloudflareD1Api(global.apiToken!, accountId);
-      await this.updateMetrics(ev);
+      const apiClient = new CloudflareD1Api(global.apiToken!, accountId);
+      this.apiClient = apiClient;
+      await this.updateMetrics(ev, generation, apiClient);
     });
   }
 }

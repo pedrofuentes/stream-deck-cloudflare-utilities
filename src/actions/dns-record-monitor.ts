@@ -339,6 +339,7 @@ export class DnsRecordMonitor extends SingletonAction<DnsRecordSettings> {
 
     this.unsubscribeGlobal = onGlobalSettingsChanged(async () => {
       if (!this.lastEvent) return;
+      this.fetchGeneration += 1;
 
       this.stopMarqueeTimer();
       this.apiClient = null;

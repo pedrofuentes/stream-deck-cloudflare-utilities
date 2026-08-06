@@ -467,6 +467,7 @@ export class WorkerDeploymentStatus extends SingletonAction<WorkerDeploymentSett
 
     this.unsubscribeGlobal = onGlobalSettingsChanged(async () => {
       if (!this.lastEvent) return;
+      this.fetchGeneration += 1;
 
       // Re-run the same flow as onDidReceiveSettings
       this.clearDisplayInterval();

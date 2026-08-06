@@ -114,7 +114,12 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
   private lastZoneName: string | null = null;
   private displayMetric: ZoneAnalyticsMetricType = "requests";
   private lastDataSettings: { accountId?: string; zoneId?: string; timeRange?: string } = {};
-  private pendingKeyCycle = false;
+  private pendingKeyCycle: {
+    metric: ZoneAnalyticsMetricType;
+    accountId?: string;
+    zoneId?: string;
+    timeRange?: string;
+  } | null = null;
   private lastEvent: WillAppearEvent<ZoneAnalyticsSettings> | DidReceiveSettingsEvent<ZoneAnalyticsSettings> | null = null;
   private unsubscribeGlobal: (() => void) | null = null;
   private unsubscribeCoordinator: (() => void) | null = null;
@@ -130,6 +135,7 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
       await keyHandler.onWillAppear(ev);
       return;
     }
+    const generation = ++this.fetchGeneration;
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
     this.subscribeToCoordinator();
@@ -147,7 +153,8 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
       return;
     }
 
-    this.apiClient = new CloudflareZoneAnalyticsApi(global.apiToken!);
+    const apiClient = new CloudflareZoneAnalyticsApi(global.apiToken!);
+    this.apiClient = apiClient;
     this.lastDataSettings = { accountId: this.getAccountId(settings, global), zoneId: settings.zoneId, timeRange: settings.timeRange };
     this.displayMetric = settings.metric ?? "requests";
     this.marquee.setText(settings.zoneName ?? settings.zoneId ?? "");
@@ -160,8 +167,9 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
         statusColor: metricColor(this.displayMetric),
       })
     );
+    if (this.fetchGeneration !== generation) return;
 
-    await this.updateMetrics(ev);
+    await this.updateMetrics(ev, generation, apiClient);
   }
 
   override async onDidReceiveSettings(ev: DidReceiveSettingsEvent<ZoneAnalyticsSettings>): Promise<void> {
@@ -170,7 +178,7 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
       await keyHandler.onDidReceiveSettings(ev);
       return;
     }
-    this.fetchGeneration += 1;
+    const generation = ++this.fetchGeneration;
     this.lastEvent = ev;
 
     const settings = ev.payload.settings;
@@ -201,8 +209,16 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
       settings.zoneId !== this.lastDataSettings.zoneId ||
       settings.timeRange !== this.lastDataSettings.timeRange;
 
-    if (this.pendingKeyCycle) {
-      this.pendingKeyCycle = false;
+    const pendingKeyCycle = this.pendingKeyCycle;
+    this.pendingKeyCycle = null;
+    if (
+      pendingKeyCycle &&
+      !dataChanged &&
+      settings.metric === pendingKeyCycle.metric &&
+      this.getAccountId(settings, global) === pendingKeyCycle.accountId &&
+      settings.zoneId === pendingKeyCycle.zoneId &&
+      settings.timeRange === pendingKeyCycle.timeRange
+    ) {
       return;
     }
 
@@ -218,12 +234,14 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
           this.marquee.getCurrentText()
         )
       );
+      if (this.fetchGeneration !== generation) return;
       this.startMarqueeIfNeeded();
       return;
     }
 
     this.stopMarqueeTimer();
-    this.apiClient = new CloudflareZoneAnalyticsApi(global.apiToken!);
+    const apiClient = new CloudflareZoneAnalyticsApi(global.apiToken!);
+    this.apiClient = apiClient;
     this.lastMetrics = null;
     this.lastZoneId = null;
     this.lastZoneName = null;
@@ -238,8 +256,9 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
         statusColor: metricColor(this.displayMetric),
       })
     );
+    if (this.fetchGeneration !== generation) return;
 
-    await this.updateMetrics(ev);
+    await this.updateMetrics(ev, generation, apiClient);
   }
 
   override onWillDisappear(ev: WillDisappearEvent<ZoneAnalyticsSettings>): void {
@@ -259,7 +278,7 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
     this.lastZoneId = null;
     this.lastZoneName = null;
     this.lastDataSettings = {};
-    this.pendingKeyCycle = false;
+    this.pendingKeyCycle = null;
     this.displayMetric = "requests";
     this.marquee.setText("");
     this.lastEvent = null;
@@ -304,18 +323,28 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
       this.startMarqueeIfNeeded();
     }
 
-    this.pendingKeyCycle = true;
-    const newSettings: ZoneAnalyticsSettings = { ...settings, metric: nextMetric };
+    const latestSettings =
+      typeof ev.action.getSettings === "function"
+        ? await ev.action.getSettings<ZoneAnalyticsSettings>()
+        : settings;
+    const newSettings: ZoneAnalyticsSettings = { ...latestSettings, metric: nextMetric };
+    this.pendingKeyCycle = {
+      metric: nextMetric,
+      accountId: this.getAccountId(latestSettings, global),
+      zoneId: latestSettings.zoneId,
+      timeRange: latestSettings.timeRange,
+    };
     await ev.action.setSettings(newSettings);
   }
 
   private async updateMetrics(
-    ev: WillAppearEvent<ZoneAnalyticsSettings> | KeyDownEvent<ZoneAnalyticsSettings> | DidReceiveSettingsEvent<ZoneAnalyticsSettings>
+    ev: WillAppearEvent<ZoneAnalyticsSettings> | KeyDownEvent<ZoneAnalyticsSettings> | DidReceiveSettingsEvent<ZoneAnalyticsSettings>,
+    generation: number,
+    apiClient: CloudflareZoneAnalyticsApi,
   ): Promise<void> {
-    const gen = ++this.fetchGeneration;
     const settings = ev.payload.settings;
 
-    if (!this.apiClient || !settings.zoneId) {
+    if (!settings.zoneId) {
       await ev.action.setImage(renderPlaceholderImage());
       return;
     }
@@ -323,9 +352,9 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
     const timeRange = settings.timeRange ?? "24h";
 
     try {
-      const metrics = await this.apiClient.getAnalytics(settings.zoneId, timeRange);
+      const metrics = await apiClient.getAnalytics(settings.zoneId, timeRange);
 
-      if (this.fetchGeneration !== gen) return;
+      if (this.fetchGeneration !== generation) return;
 
       this.lastMetrics = metrics;
       this.lastZoneId = settings.zoneId;
@@ -344,7 +373,7 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
       );
       this.startMarqueeIfNeeded();
     } catch (error) {
-      if (this.fetchGeneration !== gen) return;
+      if (this.fetchGeneration !== generation) return;
 
       this.isErrorState = true;
 
@@ -428,7 +457,8 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
   private async onCoordinatorTick(): Promise<void> {
     if (Date.now() < this.skipUntil) return;
     if (!this.apiClient || !this.lastEvent) return;
-    await this.updateMetrics(this.lastEvent);
+    const generation = ++this.fetchGeneration;
+    await this.updateMetrics(this.lastEvent, generation, this.apiClient);
   }
 
   private startMarqueeIfNeeded(): void {
@@ -474,6 +504,7 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
 
     this.unsubscribeGlobal = onGlobalSettingsChanged(async () => {
       if (!this.lastEvent) return;
+      const generation = ++this.fetchGeneration;
 
       this.stopMarqueeTimer();
       this.apiClient = null;
@@ -499,8 +530,9 @@ export class ZoneAnalytics extends SingletonAction<ZoneAnalyticsSettings> {
         return;
       }
 
-      this.apiClient = new CloudflareZoneAnalyticsApi(global.apiToken!);
-      await this.updateMetrics(ev);
+      const apiClient = new CloudflareZoneAnalyticsApi(global.apiToken!);
+      this.apiClient = apiClient;
+      await this.updateMetrics(ev, generation, apiClient);
     });
   }
 }

@@ -307,14 +307,20 @@
       }
 
       var databaseStatusDiv = document.getElementById("databaseStatus");
+      var databaseRequestGuard =
+        CloudflareAccountSelectorUtils.createRequestGuard(function () {
+          return (globalSettings.apiToken || "") + "\u0000" + (actionSettings.accountId || "");
+        });
 
       async function loadDatabases() {
         var apiToken = globalSettings.apiToken;
         var accountId = actionSettings.accountId;
         if (!apiToken || !accountId) {
+          databaseRequestGuard.invalidate();
           showStatus(databaseStatusDiv, "Select an account for this key first", "error");
           return;
         }
+        var request = databaseRequestGuard.begin();
         showStatus(databaseStatusDiv, "Loading databases…", "info");
         try {
           var resp = await fetch(
@@ -335,10 +341,12 @@
           var databases = data.result.map(function (db) {
             return { value: db.uuid, label: db.name };
           }).sort(function (a, b) { return a.label.localeCompare(b.label); });
+          if (!databaseRequestGuard.isCurrent(request)) return;
           databaseFS.setItems(databases);
           var count = databases.length;
           showStatus(databaseStatusDiv, count + " database" + (count !== 1 ? "s" : "") + " found", "success");
         } catch (err) {
+          if (!databaseRequestGuard.isCurrent(request)) return;
           showStatus(databaseStatusDiv, err.message || "Failed to load databases", "error");
         }
       }

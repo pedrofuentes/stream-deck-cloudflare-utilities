@@ -132,8 +132,13 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
   /** Tracks data-affecting settings so metric-only changes skip refetch. */
   private lastDataSettings: { accountId?: string; workerName?: string; timeRange?: string } = {};
 
-  /** Flag for key-press cycle — see AI Gateway Metric pattern. */
-  private pendingKeyCycle = false;
+  /** Exact metric-only settings echo expected after a key-cycle write. */
+  private pendingKeyCycle: {
+    metric: WorkerAnalyticsMetricType;
+    accountId?: string;
+    workerName?: string;
+    timeRange?: string;
+  } | null = null;
 
   /** Stored event reference for re-initialization. */
   private lastEvent:
@@ -170,6 +175,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       await keyHandler.onWillAppear(ev);
       return;
     }
+    const generation = ++this.fetchGeneration;
     this.lastEvent = ev;
     this.subscribeToGlobalSettings();
     this.subscribeToCoordinator();
@@ -188,7 +194,8 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     }
 
     const accountId = this.getAccountId(settings, global)!;
-    this.apiClient = new CloudflareWorkerAnalyticsApi(global.apiToken!, accountId);
+    const apiClient = new CloudflareWorkerAnalyticsApi(global.apiToken!, accountId);
+    this.apiClient = apiClient;
     this.lastDataSettings = { accountId, workerName: settings.workerName, timeRange: settings.timeRange };
     this.displayMetric = settings.metric ?? "requests";
     this.marquee.setText(settings.workerName ?? "");
@@ -201,8 +208,9 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
         statusColor: metricColor(this.displayMetric),
       })
     );
+    if (this.fetchGeneration !== generation) return;
 
-    await this.updateMetrics(ev);
+    await this.updateMetrics(ev, generation, apiClient);
   }
 
   /**
@@ -216,7 +224,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       await keyHandler.onDidReceiveSettings(ev);
       return;
     }
-    this.fetchGeneration += 1;
+    const generation = ++this.fetchGeneration;
     this.lastEvent = ev;
 
     const settings = ev.payload.settings;
@@ -245,8 +253,16 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       settings.workerName !== this.lastDataSettings.workerName ||
       settings.timeRange !== this.lastDataSettings.timeRange;
 
-    if (this.pendingKeyCycle) {
-      this.pendingKeyCycle = false;
+    const pendingKeyCycle = this.pendingKeyCycle;
+    this.pendingKeyCycle = null;
+    if (
+      pendingKeyCycle &&
+      !dataChanged &&
+      settings.metric === pendingKeyCycle.metric &&
+      this.getAccountId(settings, global) === pendingKeyCycle.accountId &&
+      settings.workerName === pendingKeyCycle.workerName &&
+      settings.timeRange === pendingKeyCycle.timeRange
+    ) {
       return;
     }
 
@@ -262,13 +278,15 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
           this.marquee.getCurrentText()
         )
       );
+      if (this.fetchGeneration !== generation) return;
       this.startMarqueeIfNeeded();
       return;
     }
 
     this.stopMarqueeTimer();
     const accountId = this.getAccountId(settings, global)!;
-    this.apiClient = new CloudflareWorkerAnalyticsApi(global.apiToken!, accountId);
+    const apiClient = new CloudflareWorkerAnalyticsApi(global.apiToken!, accountId);
+    this.apiClient = apiClient;
     this.lastMetrics = null;
     this.lastWorkerName = null;
     this.lastDataSettings = { accountId, workerName: settings.workerName, timeRange: settings.timeRange };
@@ -282,8 +300,9 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
         statusColor: metricColor(this.displayMetric),
       })
     );
+    if (this.fetchGeneration !== generation) return;
 
-    await this.updateMetrics(ev);
+    await this.updateMetrics(ev, generation, apiClient);
   }
 
   /**
@@ -305,7 +324,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     this.lastMetrics = null;
     this.lastWorkerName = null;
     this.lastDataSettings = {};
-    this.pendingKeyCycle = false;
+    this.pendingKeyCycle = null;
     this.displayMetric = "requests";
     this.marquee.setText("");
     this.lastEvent = null;
@@ -353,8 +372,17 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       this.startMarqueeIfNeeded();
     }
 
-    this.pendingKeyCycle = true;
-    const newSettings: WorkerAnalyticsSettings = { ...settings, metric: nextMetric };
+    const latestSettings =
+      typeof ev.action.getSettings === "function"
+        ? await ev.action.getSettings<WorkerAnalyticsSettings>()
+        : settings;
+    const newSettings: WorkerAnalyticsSettings = { ...latestSettings, metric: nextMetric };
+    this.pendingKeyCycle = {
+      metric: nextMetric,
+      accountId: this.getAccountId(latestSettings, global),
+      workerName: latestSettings.workerName,
+      timeRange: latestSettings.timeRange,
+    };
     await ev.action.setSettings(newSettings);
   }
 
@@ -362,18 +390,19 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
 
   /**
    * Fetches metrics from the API and updates the key display.
-   * Increments the fetch generation counter to prevent stale renders.
+   * Uses the caller's fetch generation to prevent stale renders.
    */
   private async updateMetrics(
     ev:
       | WillAppearEvent<WorkerAnalyticsSettings>
       | KeyDownEvent<WorkerAnalyticsSettings>
       | DidReceiveSettingsEvent<WorkerAnalyticsSettings>,
+    generation: number,
+    apiClient: CloudflareWorkerAnalyticsApi,
   ): Promise<void> {
-    const gen = ++this.fetchGeneration;
     const settings = ev.payload.settings;
 
-    if (!this.apiClient || !settings.workerName) {
+    if (!settings.workerName) {
       await ev.action.setImage(renderPlaceholderImage());
       return;
     }
@@ -381,10 +410,10 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
     const timeRange = settings.timeRange ?? "24h";
 
     try {
-      const metrics = await this.apiClient.getAnalytics(settings.workerName, timeRange);
+      const metrics = await apiClient.getAnalytics(settings.workerName, timeRange);
 
       // Verify this fetch is still current
-      if (this.fetchGeneration !== gen) return;
+      if (this.fetchGeneration !== generation) return;
 
       this.lastMetrics = metrics;
       this.lastWorkerName = settings.workerName;
@@ -403,7 +432,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
       this.startMarqueeIfNeeded();
     } catch (error) {
       // If stale, silently abort — a newer cycle owns the display
-      if (this.fetchGeneration !== gen) return;
+      if (this.fetchGeneration !== generation) return;
 
       this.isErrorState = true;
 
@@ -505,7 +534,8 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
   private async onCoordinatorTick(): Promise<void> {
     if (Date.now() < this.skipUntil) return;
     if (!this.apiClient || !this.lastEvent) return;
-    await this.updateMetrics(this.lastEvent);
+    const generation = ++this.fetchGeneration;
+    await this.updateMetrics(this.lastEvent, generation, this.apiClient);
   }
 
   private startMarqueeIfNeeded(): void {
@@ -551,6 +581,7 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
 
     this.unsubscribeGlobal = onGlobalSettingsChanged(async () => {
       if (!this.lastEvent) return;
+      const generation = ++this.fetchGeneration;
 
       this.stopMarqueeTimer();
       this.apiClient = null;
@@ -575,12 +606,13 @@ export class WorkerAnalytics extends SingletonAction<WorkerAnalyticsSettings> {
         return;
       }
 
-      this.apiClient = new CloudflareWorkerAnalyticsApi(
+      const apiClient = new CloudflareWorkerAnalyticsApi(
         global.apiToken!,
         this.getAccountId(settings, global)!
       );
+      this.apiClient = apiClient;
 
-      await this.updateMetrics(ev);
+      await this.updateMetrics(ev, generation, apiClient);
     });
   }
 }
