@@ -22,6 +22,12 @@ type RequestGuard = {
   isCurrent(request: unknown): boolean;
 };
 
+function extractInlineScripts(html: string): string[] {
+  return [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)]
+    .filter((match) => !/\bsrc\s*=/i.test(match[1] ?? ""))
+    .map((match) => match[2] ?? "");
+}
+
 class MockFilterableSelect {
   static instances: MockFilterableSelect[] = [];
 
@@ -253,6 +259,14 @@ describe("CloudflareAccountSelector lifecycle", () => {
 });
 
 describe("authenticated Property Inspector initialization", () => {
+  it("extracts attributed inline scripts regardless of tag casing", () => {
+    expect(
+      extractInlineScripts(
+        '<script src="external.js"></script><SCRIPT type="module">initialize()</SCRIPT>',
+      ),
+    ).toEqual(["initialize()"]);
+  });
+
   const inspectors = [
     {
       file: "ai-gateway-metric.html",
@@ -309,8 +323,10 @@ describe("authenticated Property Inspector initialization", () => {
         resolve(process.cwd(), "plugin/ui", file),
         "utf8",
       );
-      const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
-      const inlineScript = scripts.at(-1)?.[1] ?? "";
+      const inlineScripts = extractInlineScripts(html);
+      expect(inlineScripts).toHaveLength(1);
+      const inlineScript = inlineScripts[0];
+      expect(inlineScript).toContain("CloudflareAccountSelector");
       const elements = new Map<string, Record<string, unknown>>();
       const selectorOptions: SelectorOptions[] = [];
       const guardFactory = vi.fn(() => ({
