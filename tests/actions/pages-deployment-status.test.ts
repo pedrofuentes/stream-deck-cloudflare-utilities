@@ -464,5 +464,34 @@ describe("PagesDeploymentStatus", () => {
       await capturedGlobalListener!({});
       expect(decodeSvg(ev.action.setImage.mock.calls[0][0])).toContain("Setup");
     });
+
+    it("should not render an in-flight deployment after credentials are removed", async () => {
+      let resolveFetch!: (status: PagesDeployStatus) => void;
+      mockGetDeploymentStatus.mockImplementationOnce(
+        () =>
+          new Promise<PagesDeployStatus>((resolvePromise) => {
+            resolveFetch = resolvePromise;
+          }),
+      );
+      const ev = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-a",
+      });
+      const pendingFetch = action.onWillAppear(ev);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      vi.mocked(getGlobalSettings).mockReturnValue({});
+      await capturedGlobalListener!({});
+      const callsAfterSetup = ev.action.setImage.mock.calls.length;
+
+      resolveFetch(makeStatus({ branch: "removed-token" }));
+      await pendingFetch;
+
+      expect(ev.action.setImage).toHaveBeenCalledTimes(callsAfterSetup);
+      expect(decodeSvg(ev.action.setImage.mock.calls.at(-1)[0])).toContain(
+        "Please",
+      );
+    });
   });
 });

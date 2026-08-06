@@ -73,6 +73,7 @@ function makeMockEvent(settings: Record<string, unknown> = {}, actionId = "key-1
     payload: { settings },
     action: {
       id: actionId,
+      getSettings: vi.fn().mockResolvedValue(settings),
       setImage: vi.fn().mockResolvedValue(undefined),
       setSettings: vi.fn().mockResolvedValue(undefined),
     },
@@ -580,6 +581,47 @@ describe("AiGatewayMetric", () => {
   // ── onDidReceiveSettings ───────────────────────────────────────────────
 
   describe("onDidReceiveSettings", () => {
+    it("does not let an older loading render start the newest account request", async () => {
+      mockGetMetrics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(
+        makeMockEvent({
+          ...VALID_SETTINGS,
+          accountId: "account-a",
+        }),
+      );
+      mockGetMetrics.mockClear();
+
+      let releaseOldLoading!: () => void;
+      const oldEvent = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-a",
+        gatewayId: "old-gateway",
+      });
+      oldEvent.action.setImage.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolvePromise) => {
+            releaseOldLoading = resolvePromise;
+          }),
+      );
+      const oldUpdate = action.onDidReceiveSettings(oldEvent);
+      await Promise.resolve();
+
+      const newEvent = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-b",
+        gatewayId: "new-gateway",
+      });
+      await action.onDidReceiveSettings(newEvent);
+      releaseOldLoading();
+      await oldUpdate;
+
+      expect(mockGetMetrics).toHaveBeenCalledTimes(1);
+      expect(mockGetMetrics).toHaveBeenCalledWith(
+        "new-gateway",
+        expect.anything(),
+      );
+    });
+
     it("should show setup image when credentials become missing", async () => {
       vi.mocked(getGlobalSettings).mockReturnValue({});
       const ev = makeMockEvent({});
@@ -691,6 +733,67 @@ describe("AiGatewayMetric", () => {
   // ── onKeyDown (metric cycling) ─────────────────────────────────────────
 
   describe("onKeyDown", () => {
+    it("merges the cycled metric into the latest key settings", async () => {
+      mockGetMetrics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(
+        makeMockEvent({
+          ...VALID_SETTINGS,
+          accountId: "account-a",
+        }),
+      );
+      const keyEv = makeMockEvent({
+        ...VALID_SETTINGS,
+        accountId: "account-a",
+        gatewayId: "old-gateway",
+      });
+      keyEv.action.getSettings.mockResolvedValue({
+        ...VALID_SETTINGS,
+        accountId: "account-b",
+        gatewayId: "new-gateway",
+      });
+
+      await action.onKeyDown(keyEv);
+
+      expect(keyEv.action.setSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: "account-b",
+          gatewayId: "new-gateway",
+          metric: "tokens",
+        }),
+      );
+    });
+
+    it("does not consume an account change as a key-cycle settings echo", async () => {
+      mockGetMetrics.mockResolvedValue(makeMetrics());
+      await action.onWillAppear(
+        makeMockEvent({
+          ...VALID_SETTINGS,
+          accountId: "account-a",
+        }),
+      );
+      await action.onKeyDown(
+        makeMockEvent({
+          ...VALID_SETTINGS,
+          accountId: "account-a",
+        }),
+      );
+      mockGetMetrics.mockClear();
+
+      await action.onDidReceiveSettings(
+        makeMockEvent({
+          ...VALID_SETTINGS,
+          accountId: "account-b",
+          gatewayId: "new-gateway",
+        }),
+      );
+
+      expect(mockGetMetrics).toHaveBeenCalledWith(
+        "new-gateway",
+        expect.anything(),
+      );
+      expect(mockClientAccounts.at(-1)).toBe("account-b");
+    });
+
     it("should cycle from requests to tokens", async () => {
       mockGetMetrics.mockResolvedValue(makeMetrics());
       const ev = makeMockEvent(VALID_SETTINGS);
